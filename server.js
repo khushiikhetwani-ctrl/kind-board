@@ -36,8 +36,8 @@ const CONFIG = {
   boardH: 3000,
 };
 
-if (!process.env.IP_SALT) console.warn('[kindboard] IP_SALT not set — set it in production.');
-if (!CONFIG.adminKey) console.warn('[kindboard] ADMIN_KEY not set — the moderation page is disabled.');
+if (!process.env.IP_SALT) console.warn('[kindboard] IP_SALT not set. Set it in production.');
+if (!CONFIG.adminKey) console.warn('[kindboard] ADMIN_KEY not set, so the moderation page is disabled.');
 
 // ---------------------------------------------------------------- database
 
@@ -152,7 +152,7 @@ function hits(key, windowMs) {
   buckets.set(key, list);
   return list;
 }
-function rateLimit(key, max, windowMs, message = 'Slow down a little — try again in a moment.') {
+function rateLimit(key, max, windowMs, message = 'Slow down a little and try again in a moment.') {
   const list = hits(key, windowMs);
   if (list.length >= max) throw new HttpError(429, message);
   list.push(now());
@@ -190,7 +190,7 @@ async function verifyPassphrase(pass, stored) {
 }
 function passphraseProblem(pass, handle) {
   const p = String(pass || '');
-  if (p.length < 10) return 'Use at least 10 characters — a short sentence works well.';
+  if (p.length < 10) return 'Use at least 10 characters. A short sentence works well.';
   if (p.length > 200) return 'That passphrase is too long.';
   if (COMMON_PASSPHRASES.has(p.toLowerCase()) || /^(.)\1+$/.test(p)) return 'That passphrase is too easy to guess.';
   if (handle && p.toLowerCase().includes(handle.split('-')[0])) return 'Don’t include your animal name in your passphrase.';
@@ -244,7 +244,7 @@ function requirePoster(user) {
   return user;
 }
 function requireToday(day) {
-  if (day !== today()) throw new HttpError(403, 'This day has been archived — it can be viewed, but not edited.', { archived: true });
+  if (day !== today()) throw new HttpError(403, 'This day has been archived. It can be viewed, but not edited.', { archived: true });
 }
 
 // ---------------------------------------------------------------- moderation
@@ -439,7 +439,7 @@ route('GET', /^\/api\/quote$/, () => {
 
 route('POST', /^\/api\/signup$/, async ({ req, res }) => {
   const ip = ipHash(req);
-  if (hits(`signup:${ip}`, 3_600_000).length >= 10) throw new HttpError(429, 'Too many new identities from here — try again later.');
+  if (hits(`signup:${ip}`, 3_600_000).length >= 10) throw new HttpError(429, 'Too many new identities from here. Try again later.');
   const ban = q('SELECT until FROM banned_ips WHERE ip_hash = ?').get(ip);
   if (ban && ban.until > now()) throw new HttpError(403, 'New identities are paused from this network for a little while.', { banned: true });
   const body = await readJson(req);
@@ -465,7 +465,7 @@ route('POST', /^\/api\/login$/, async ({ req, res }) => {
   const ip = ipHash(req);
   const body = await readJson(req);
   const handle = String(body.handle || '').trim().toLowerCase().replace(/\s+/g, '-');
-  rateLimit(`login-ip:${ip}`, 20, 900_000, 'Too many attempts — wait a few minutes.');
+  rateLimit(`login-ip:${ip}`, 20, 900_000, 'Too many attempts. Wait a few minutes.');
   // Per-handle lockout stops slow, distributed guessing against one identity.
   if (hits(`login-fail:${handle}`, 900_000).length >= 8) throw new HttpError(429, 'This handle is locked for 15 minutes after too many attempts.');
   const user = /^[a-z]+-\d{4}$/.test(handle) ? q('SELECT * FROM users WHERE handle = ?').get(handle) : null;
@@ -540,7 +540,7 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
   const day = today();
   const text = cleanText(body.text);
   const support = moderate(text);
-  rateLimit(`note:${user.id}`, 4, 60_000, 'You’ve pinned a few notes quickly — take a breath and try again in a minute.');
+  rateLimit(`note:${user.id}`, 4, 60_000, 'You’ve pinned a few notes quickly. Take a breath and try again in a minute.');
   const color = NOTE_COLORS.includes(body.color) ? body.color : 'butter';
   const paper = PAPERS.includes(body.paper) ? body.paper : 'plain';
   const fastener = FASTENERS.includes(body.fastener) ? body.fastener : 'pin';
@@ -704,7 +704,7 @@ route('POST', /^\/api\/flag$/, async ({ req, user }) => {
   if (!TABLES[type]) throw new HttpError(400, 'Unknown item.');
   const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ?`).get(id);
   if (!row || row.hidden) throw new HttpError(404, 'That is no longer on the board.');
-  if (row.user_id === user.id) throw new HttpError(400, 'You can’t flag your own post — you can delete it instead.');
+  if (row.user_id === user.id) throw new HttpError(400, 'You can’t flag your own post, but you can delete it.');
   rateLimit(`flag:${user.id}`, 30, 3_600_000);
   q('INSERT OR IGNORE INTO flags (target_type, target_id, user_id, reason, created_at) VALUES (?, ?, ?, ?, ?)').run(
     type, id, user.id, FLAG_REASONS.includes(reason) ? reason : 'other', now(),
@@ -844,7 +844,7 @@ function seedWelcome() {
   }
   q('INSERT INTO notes (id, day, user_id, text, color, x, y, rot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     randomUUID(), today(), 'system',
-    'Welcome.\n\nThis is a board for anyone who wants someone to talk to. Pin a thought, a worry, a small win — there’s no word limit. Someone will write back.\n\nYou’re anonymous here. Be kind, always.',
+    'Welcome.\n\nThis is a board for anyone who wants someone to talk to. Pin a thought, a worry, a small win. There’s no word limit. Someone will write back.\n\nYou’re anonymous here. Be kind, always.',
     'butter', CONFIG.boardW / 2 - 130, CONFIG.boardH / 2 - 140, -0.6, now(),
   );
 }

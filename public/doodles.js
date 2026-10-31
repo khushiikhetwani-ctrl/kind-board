@@ -31,7 +31,7 @@ export function doodleEl(name) {
   svg.setAttribute('stroke-width', '2.6');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  // Static, trusted artwork from this file only — never user content.
+  // Static, trusted artwork from this file only, never user content.
   const parsed = new DOMParser().parseFromString(`<svg xmlns="${NS}">${inner}</svg>`, 'image/svg+xml');
   svg.append(...parsed.documentElement.childNodes);
   wrap.append(svg);

@@ -58,7 +58,7 @@ It's one Node process plus one SQLite file.
 | `PORT` | `3000` | |
 | `DB_PATH` | `./kindboard.db` | Put it on a persistent disk. |
 | `ADMIN_KEY` | *(off)* | Password for `/admin`. |
-| `IP_SALT` | — | Secret for hashing IPs. Raw IPs are never stored. |
+| `IP_SALT` | none | Secret for hashing IPs. Raw IPs are never stored. |
 | `BOARD_TZ` | `UTC` | When "today" rolls over, e.g. `America/New_York`. |
 | `TRUST_PROXY` | off | `1` behind Render/Fly/Nginx. |
 | `COOKIE_SECURE` | auto | Force `1`/`0` if auto-detection is wrong for your host. |

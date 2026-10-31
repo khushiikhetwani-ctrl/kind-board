@@ -50,7 +50,7 @@ export const QUOTES = [
   ['If you want to go fast, go alone. If you want to go far, go together.', 'Proverb'],
 ].map(([text, author, source]) => ({ text, author, source: source || null }));
 
-// Word-play tiles. Deliberately only kind or neutral words — no negations
+// Word-play tiles. Deliberately only kind or neutral words, with no negations
 // ("not", "never", "no") and nothing that could be arranged into a put-down.
 export const GLUE_WORDS = [
   'I', 'you', 'we', 'me', 'my', 'your', 'our', 'is', 'am', 'are', 'be', 'the', 'a', 'and', 'so', 'to', 'of',

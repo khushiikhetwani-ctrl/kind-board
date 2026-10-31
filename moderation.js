@@ -89,10 +89,10 @@ const JAB_RE = new RegExp(
 export function checkText(text) {
   const t = normalize(text);
   if (HARD_RE.test(t)) {
-    return { ok: false, reason: 'This note contains words that could hurt someone. Kindboard is a gentle place — try saying it another way.' };
+    return { ok: false, reason: 'This note contains words that could hurt someone. Kindboard is a gentle place. Try saying it another way.' };
   }
   if (DIRECTED_RE.test(t) || JAB_RE.test(t)) {
-    return { ok: false, reason: 'This reads as belittling someone. Disagreeing is fine — putting people down isn’t. Try rephrasing?' };
+    return { ok: false, reason: 'This reads as belittling someone. Disagreeing is fine, but putting people down isn’t. Try rephrasing?' };
   }
   return { ok: true, support: SUPPORT_RE.test(t) };
 }
@@ -110,7 +110,7 @@ export function checkTile(word) {
   if (!/^[\p{L}'’-]{1,18}$/u.test(w)) return { ok: false, reason: 'Tiles are single words (letters only, up to 18).' };
   const t = normalize(w);
   if (HARD_RE.test(t) || TILE_DENY.test(t) || TILE_DENY.test(t.replace(/(.)\1+/g, '$1'))) {
-    return { ok: false, reason: 'That word can’t be a tile — word play here is for kind sentences.' };
+    return { ok: false, reason: 'That word can’t be a tile. Word play here is for kind sentences.' };
   }
   return { ok: true };
 }

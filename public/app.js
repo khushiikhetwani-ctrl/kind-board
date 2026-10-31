@@ -192,7 +192,7 @@ async function withLoader(label, task, { min = 1600 } = {}) {
     span.style.setProperty('--i', i);
     return [span, ' '];
   }));
-  $('#loaderBy').replaceChildren(`— ${q.author}`, ...(q.source ? [', ', h('cite', { text: q.source })] : []));
+  $('#loaderBy').replaceChildren(q.author, ...(q.source ? [', ', h('cite', { text: q.source })] : []));
   el.style.setProperty('--after', `${Math.min(words.length * 40 + 500, 1600)}ms`);
   el.classList.remove('out');
   el.hidden = false;
@@ -393,7 +393,7 @@ async function submitWith(form, fn) {
 $('#signupForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const form = e.target;
-  if ($('#newPass').value.length < 10) return showError(form, 'Use at least 10 characters — a little sentence works well.');
+  if ($('#newPass').value.length < 10) return showError(form, 'Use at least 10 characters. A little sentence works well.');
   if (!$('#agree').checked) return showError(form, 'Please agree to keep it kind.');
   submitWith(form, async () => {
     const { me } = await api('POST', '/api/signup', { animal: S.signupAnimal, passphrase: $('#newPass').value, remember: $('#rememberNew').checked });
@@ -473,7 +473,7 @@ async function showCalendar() {
   if (!S.calMonth) S.calMonth = S.cfg.today.slice(0, 7);
   $('#todayLabel').textContent = fmtDay(S.cfg.today, { weekday: 'long', day: 'numeric', month: 'long' });
   const quote = api('GET', '/api/quote').then((d) => {
-    $('#todayQuote').replaceChildren(`${d.quote.text}”`, h('small', { text: `— ${d.quote.author}` }));
+    $('#todayQuote').replaceChildren(`${d.quote.text}”`, h('small', { text: d.quote.author }));
     $('#tcNotes').textContent = d.notes;
     $('#tcNotesLabel').textContent = d.notes === 1 ? 'note pinned today' : 'notes pinned today';
     $('#tcReplies').textContent = d.replies;
@@ -616,7 +616,7 @@ function peek(btn, day, info) {
   const p = $('#calPeek');
   p.replaceChildren(
     h('b', { text: fmtDay(day, { weekday: 'long', day: 'numeric', month: 'long' }) }),
-    h('p', { text: info?.preview ? `“${info.preview}${info.preview.length >= 90 ? '…' : ''}”` : day === S.cfg.today ? 'Nothing yet — be the first.' : 'A quiet day.' }),
+    h('p', { text: info?.preview ? `“${info.preview}${info.preview.length >= 90 ? '…' : ''}”` : day === S.cfg.today ? 'Nothing yet. Be the first.' : 'A quiet day.' }),
     info ? h('p', { class: 'peek-meta', text: `${info.notes} ${info.notes === 1 ? 'note' : 'notes'} · ${info.replies} ${info.replies === 1 ? 'reply' : 'replies'}${day === S.cfg.today ? '' : ' · archived'}` }) : null,
   );
   p.hidden = false;
@@ -699,7 +699,7 @@ function updateEmpty() {
   $('#empty').hidden = !empty;
   if (!empty) return;
   $('.empty-title').textContent = S.archived ? 'A quiet day.' : 'A blank page.';
-  $('.empty-sub').textContent = S.archived ? 'Nothing was pinned on this day.' : 'Be the first to write something today — someone will write back.';
+  $('.empty-sub').textContent = S.archived ? 'Nothing was pinned on this day.' : 'Be the first to write something today. Someone will write back.';
 }
 
 // Stable per-note "randomness" so every viewer sees the same pin colour, curl and drift.
@@ -1705,7 +1705,7 @@ async function checkRollover() {
     } else if (S.view === 'calendar') {
       showCalendar();
     }
-  } catch { /* offline — try again next minute */ }
+  } catch { /* offline; try again next minute */ }
 }
 setInterval(() => {
   for (const n of S.notes.values()) {
