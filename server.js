@@ -90,6 +90,8 @@ db.exec(`
   const cols = new Set(db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name));
   if (!cols.has('paper')) db.exec("ALTER TABLE notes ADD COLUMN paper TEXT NOT NULL DEFAULT 'plain'");
   if (!cols.has('fastener')) db.exec("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
+  const userCols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
+  if (!userCols.has('look')) db.exec('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
 }
 
 const q = (sql) => db.prepare(sql);
@@ -227,8 +229,19 @@ function sessionUser(req) {
 }
 
 const displayName = (u) => `Anonymous ${u.animal}`;
+// A pixel character: hairstyle + indexes into the client's colour lists.
+const HAIRSTYLES = ['bowl', 'short', 'curly', 'long', 'bun'];
+function cleanLook(raw) {
+  const n = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
+  return { style: HAIRSTYLES.includes(raw?.style) ? raw.style : 'short', skin: n(raw?.skin, 4), hair: n(raw?.hair, 5), suit: n(raw?.suit, 7) };
+}
+function readLook(u) {
+  try { return u.look ? cleanLook(JSON.parse(u.look)) : null; } catch { return null; }
+}
+
 function publicMe(u) {
   return {
+    look: readLook(u),
     handle: u.handle, name: displayName(u), animal: u.animal, color: u.color,
     strikes: u.strikes, banned: !!u.banned, strikesToBan: CONFIG.strikesToBan,
   };
@@ -516,6 +529,14 @@ route('POST', /^\/api\/logout-everywhere$/, ({ req, res, user }) => {
 });
 
 route('GET', /^\/api\/me$/, ({ user }) => ({ me: user ? publicMe(user) : null }));
+
+route('PUT', /^\/api\/me\/look$/, async ({ req, user }) => {
+  requireUser(user);
+  rateLimit(`look:${user.id}`, 30, 600_000);
+  const look = cleanLook(await readJson(req, 1024));
+  q('UPDATE users SET look = ? WHERE id = ?').run(JSON.stringify(look), user.id);
+  return { me: publicMe({ ...user, look: JSON.stringify(look) }) };
+});
 
 route('GET', /^\/api\/board$/, ({ url, user }) => {
   requireUser(user);

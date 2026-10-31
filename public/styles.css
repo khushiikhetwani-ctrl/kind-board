@@ -858,3 +858,33 @@ button { cursor: pointer; }
 .garden.visit { position: fixed; height: 130px; z-index: 0; }
 .cal-view .cal-layout { position: relative; z-index: 1; }
 .cal-layout { padding-bottom: 150px; }
+
+/* ============================================================ pixel-art garden */
+:root {
+  --px-grass: #7fb069; --px-grass-dark: #5e8f4e; --px-dirt: #d7b893; --px-dirt-dark: #c0a07a; --px-cloud: #ffffff;
+  --px-hair: #3d2a20; --px-eye: #2b2228; --px-cheek: #ef5a5a; --px-mouth: #c2475a; --px-suit: #5fb7a1; --px-suit-light: #8fd3c1;
+  --px-shoe: #5b3b2a; --px-bush-light: #9cc584; --px-flower-eye: #f2c94c; --px-heart: #ef5a7a;
+  --px-wing-1: #f2b8c6; --px-wing-2: #f6d77a; --px-wing-3: #b9b2f2; --px-wing-4: #9fd3c7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --px-grass: #4f7a45; --px-grass-dark: #3c5f35; --px-dirt: #5c4634; --px-dirt-dark: #4a3829; --px-cloud: #3a3a44; --px-bush-light: #6f9a5c; }
+}
+:root[data-theme="dark"] { --px-grass: #4f7a45; --px-grass-dark: #3c5f35; --px-dirt: #5c4634; --px-dirt-dark: #4a3829; --px-cloud: #3a3a44; --px-bush-light: #6f9a5c; }
+.garden { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* an open, gentle hand when you're over the little ones */
+body.pat-cursor, body.pat-cursor * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' shape-rendering='crispEdges'%3E%3Cpath fill='%23fff' stroke='%23161513' stroke-width='1.5' d='M7 22V12H5V8h2V3h2v6h1V2h2v7h1V3h2v7h1V6h2v10l-2 6z'/%3E%3C/svg%3E") 12 4, pointer !important;
+}
+
+/* character customiser */
+.look-stage { display: grid; place-items: center; height: 170px; border-radius: 18px; margin-bottom: 16px; background: linear-gradient(var(--bg) 70%, var(--px-grass) 70% 74%, var(--px-dirt) 74%); }
+#lookPreview { width: 112px; height: 144px; image-rendering: pixelated; margin-top: 8px; }
+.look-rows { display: grid; gap: 12px; }
+.look-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; }
+.look-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.look-opt { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2); padding: 0; background: var(--sw); transition: transform 0.3s var(--spring), box-shadow 0.2s; }
+.look-opt:hover { transform: scale(1.1); }
+.look-opt[aria-checked="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--ink); }
+.look-opt.style { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; background: transparent; font-size: 13px; color: var(--ink-2); text-transform: capitalize; }
+.look-opt.style[aria-checked="true"] { color: var(--ink); background: var(--raised); }

@@ -420,6 +420,19 @@
     <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button type="button" class="btn primary" id="saveSticker">Save sticker</button></div>
   </dialog>
 
+  <dialog id="lookDlg" class="dlg">
+    <div class="dlg-head"><h2 class="serif">Your character</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="muted">This little person walks into the garden to say hi. Pat their head to make them smile.</p>
+    <div class="look-stage"><canvas id="lookPreview" width="14" height="18" aria-label="Preview of your character"></canvas></div>
+    <div class="look-rows">
+      <div class="look-row"><span class="label">Hair</span><div class="look-opts" id="lookStyle" role="radiogroup" aria-label="Hairstyle"></div></div>
+      <div class="look-row"><span class="label">Hair colour</span><div class="look-opts" id="lookHair" role="radiogroup" aria-label="Hair colour"></div></div>
+      <div class="look-row"><span class="label">Skin</span><div class="look-opts" id="lookSkin" role="radiogroup" aria-label="Skin tone"></div></div>
+      <div class="look-row"><span class="label">Outfit</span><div class="look-opts" id="lookSuit" role="radiogroup" aria-label="Jumpsuit colour"></div></div>
+    </div>
+    <div class="dlg-actions"><button type="button" class="btn subtle" id="lookShuffle"><svg class="i"><use href="#i-shuffle"/></svg>Surprise me</button><button type="button" class="btn primary" id="lookSave">Save</button></div>
+  </dialog>
+
   <dialog id="supportDlg" class="dlg">
     <form method="dialog">
       <h2 class="serif">You're not alone.</h2>
@@ -441,6 +454,7 @@
     </div>
     <div class="strikes"></div>
     <div class="menu-list">
+      <button id="lookBtn"><svg class="i"><use href="#i-user"/></svg>Your character</button>
       <button data-open="guidelinesDlg"><svg class="i"><use href="#i-book"/></svg>Community guidelines</button>
       <button id="logoutBtn"><svg class="i"><use href="#i-logout"/></svg>Log out</button>
       <button id="logoutAllBtn" class="danger"><svg class="i"><use href="#i-shield"/></svg>Log out on all devices</button>

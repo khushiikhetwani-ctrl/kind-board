@@ -2,7 +2,7 @@
 // Flow: hello → what this is → kind rules → log in → calendar → a day's board.
 
 import { DOODLES, doodleEl } from './doodles.js';
-import { startGarden } from './garden.js';
+import { startGarden, drawCharacter, LOOKS, HAIRSTYLES, randomLook } from './garden.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -159,8 +159,8 @@ async function route() {
     garden?.pause();
   }
   if (view === 'calendar') {
-    if (!visitor) visitor = startGarden($('#visitor'), { mode: 'visit' });
-    else if (S.view !== 'calendar') visitor.restart();
+    if (!visitor) visitor = startGarden($('#visitor'), { mode: 'visit', look: myLook() });
+    else if (S.view !== 'calendar') { visitor.setLook(myLook()); visitor.restart(); }
     visitor.play();
   } else {
     visitor?.pause();
@@ -276,7 +276,8 @@ async function helloLoop(run) {
 let garden = null;
 let visitor = null; // the same gardener, popping by on the calendar
 function showIntro() {
-  garden ??= startGarden($('#garden'));
+  garden ??= startGarden($('#garden'), { look: S.me?.look });
+  garden.setLook(S.me?.look || null);
   garden.play();
   const step = S.me ? 0 : Number(new URLSearchParams(location.search).get('step')) || 0;
   setIntroStep(step);
@@ -434,6 +435,71 @@ $('#loginForm').addEventListener('submit', (e) => {
   });
 });
 $('[data-copy-handle]').onclick = () => copy(S.me.handle, 'Handle copied');
+
+// ---------------------------------------------------------------- the little garden: gentle pats only
+
+const myLook = () => S.me?.look || (S.me ? { style: 'short', skin: 1, hair: 2, suit: 2 } : null);
+function gardenFor(view) {
+  return view === 'intro' ? garden : view === 'calendar' ? visitor : null;
+}
+window.addEventListener('pointermove', (e) => {
+  const g = gardenFor(S.view);
+  document.body.classList.toggle('pat-cursor', !!g?.hover(e.clientX, e.clientY) && !e.target.closest('button, a, input, textarea, .today-card, .cal-map, .cal-grid'));
+}, { passive: true });
+window.addEventListener('click', (e) => {
+  if (e.target.closest('button, a, input, textarea, label, dialog, .today-card, .cal-map, .cal-grid')) return;
+  const g = gardenFor(S.view);
+  if (g?.pat(e.clientX, e.clientY)) {
+    // a pat isn't a "click to continue"
+    e.stopPropagation();
+    e.preventDefault();
+  }
+}, true);
+
+// ---------------------------------------------------------------- your character
+
+let draftLook = null;
+function renderLookDialog() {
+  drawCharacter($('#lookPreview'), draftLook, 'wave1', 'happy');
+  const opt = (container, items, isOn, onPick, makeBtn) => {
+    $(container).replaceChildren(...items.map((item, i) => {
+      const b = makeBtn(item, i);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(isOn(item, i)));
+      b.onclick = () => { onPick(item, i); renderLookDialog(); };
+      return b;
+    }));
+  };
+  const swatch = (color, label) => {
+    const b = h('button', { type: 'button', class: 'look-opt', 'aria-label': label });
+    b.style.setProperty('--sw', color);
+    return b;
+  };
+  opt('#lookStyle', HAIRSTYLES, (st) => draftLook.style === st, (st) => { draftLook.style = st; },
+    (st) => h('button', { type: 'button', class: 'look-opt style', text: st }));
+  opt('#lookHair', LOOKS.hair, (_, i) => draftLook.hair === i, (_, i) => { draftLook.hair = i; }, (c, i) => swatch(c, `Hair colour ${i + 1}`));
+  opt('#lookSkin', LOOKS.skin, (_, i) => draftLook.skin === i, (_, i) => { draftLook.skin = i; }, (c, i) => swatch(c, `Skin tone ${i + 1}`));
+  opt('#lookSuit', LOOKS.suit, (_, i) => draftLook.suit === i, (_, i) => { draftLook.suit = i; }, (c, i) => swatch(c[0], `Outfit colour ${i + 1}`));
+}
+$('#lookBtn').onclick = () => {
+  hidePopovers();
+  draftLook = { ...myLook() };
+  renderLookDialog();
+  $('#lookDlg').showModal();
+};
+$('#lookShuffle').onclick = () => { draftLook = randomLook(); renderLookDialog(); };
+$('#lookSave').onclick = async () => {
+  try {
+    const { me } = await api('PUT', '/api/me/look', draftLook);
+    S.me = { ...S.me, ...me };
+    garden?.setLook(me.look);
+    visitor?.setLook(me.look);
+    $('#lookDlg').close();
+    toast('Saved. Look out for them in the garden.');
+  } catch (err) {
+    toast(err.message);
+  }
+};
 
 // ---------------------------------------------------------------- identity menu
 
