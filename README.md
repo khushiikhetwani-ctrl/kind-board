@@ -27,9 +27,11 @@ Every day has its own board. When the day ends, the board is **archived**: anyon
 | Brute force | Per-IP rate limits, plus a **15-minute lockout per handle** after 8 failed attempts. Unknown handles get the same generic error and take the same time. |
 | CSRF / XSS | A custom request header and Origin check, a strict Content-Security-Policy, and user content rendered only as text. |
 | Kindness filter | Slurs, threats, "kys" and belittling insults are blocked before posting, even with leetspeak or s.p.a.c.i.n.g. Venting about yourself is allowed. |
-| Flags & strikes | 3 different people flag a post → it's hidden + its author gets a strike. **2 strikes → paused.** Their posts are removed, and new sign-ups from that network pause for 7 days. |
+| Automatic moderation | Clearly harmful posts are refused and count as a **strike** automatically. **2 strikes → paused**: their posts are removed, and new sign-ups from that network pause for 7 days. Put-downs are refused with a prompt to rephrase (no strike). |
+| Waiting for approval | Links, contact details, "DM me on…" and hand-made stickers go up as **waiting for approval**. Only the writer sees them until a moderator approves them on `/admin`. |
+| Reports | A quiet "Report" in each ⋯ menu. Reports never give strikes; 3 of them send a post back for a moderator to review. |
 | Support | Notes that sound like someone is struggling still post, and the writer is shown crisis lines (988, Samaritans, findahelpline.com). |
-| Moderators | `/admin` with your `ADMIN_KEY`: remove (adds a strike), restore (refunds it), or dismiss. |
+| Moderators | `/admin` with your `ADMIN_KEY`: approve or decline waiting posts, keep or remove reported ones (removing adds a strike), restore mistakes. Check it regularly so nobody waits long. |
 
 ## Run it
 
@@ -62,7 +64,7 @@ It's one Node process plus one SQLite file.
 | `BOARD_TZ` | `UTC` | When "today" rolls over, e.g. `America/New_York`. |
 | `TRUST_PROXY` | off | `1` behind Render/Fly/Nginx. |
 | `COOKIE_SECURE` | auto | Force `1`/`0` if auto-detection is wrong for your host. |
-| `FLAGS_TO_HIDE` | `3` | Distinct flaggers needed to auto-hide a post. |
+| `FLAGS_TO_HIDE` | `3` | Distinct reports that send a post back to review. |
 
 ## Known limits
 

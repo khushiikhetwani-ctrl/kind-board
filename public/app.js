@@ -2,6 +2,7 @@
 // Flow: hello → what this is → kind rules → log in → calendar → a day's board.
 
 import { DOODLES, doodleEl } from './doodles.js';
+import { startGarden } from './garden.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -153,7 +154,10 @@ async function route() {
     closeTray();
     stopPlacing();
   }
-  if (view !== 'intro') stopHello();
+  if (view !== 'intro') {
+    stopHello();
+    garden?.pause();
+  }
   if (view === 'intro') showIntro();
   if (view === 'auth') showAuth();
   // Every wait is a small pause with a quote.
@@ -243,6 +247,9 @@ async function helloLoop(run) {
     lang.textContent = i === 0 ? name : `“${HELLOS[0][0].toLowerCase()}” in ${name}`;
     lang.style.opacity = 1;
     const g = graphemes(word);
+    // Wide scripts (Japanese, Korean, Thai…) need a smaller size to fit on one line.
+    const ems = g.reduce((sum, ch) => sum + (/[\u0E00-\u0E7F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/.test(ch) ? 1 : 0.62), 0);
+    text.parentElement.style.fontSize = `min(200px, 15vw, ${Math.floor(82 / ems)}vw, ${Math.floor(780 / ems)}px)`;
     for (let k = 1; k <= g.length && run.alive; k++) {
       text.textContent = g.slice(0, k).join('');
       await sleep(70 + Math.random() * 70);
@@ -259,12 +266,16 @@ async function helloLoop(run) {
   }
 }
 
+let garden = null;
 function showIntro() {
+  garden ??= startGarden($('#garden'));
+  garden.play();
   const step = S.me ? 0 : Number(new URLSearchParams(location.search).get('step')) || 0;
   setIntroStep(step);
 }
 function setIntroStep(n) {
   S.introStep = n;
+  $('#intro').dataset.step = n;
   $$('.intro-step').forEach((el, i) => {
     el.classList.toggle('on', i === n);
     el.classList.toggle('past', i < n);

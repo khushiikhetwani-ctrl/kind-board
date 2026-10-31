@@ -828,3 +828,28 @@ button { cursor: pointer; }
   .pen-colors .swatch:nth-child(n+7) { display: none; }
 }
 @keyframes fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ============================================================ the little garden behind the intro */
+:root {
+  --garden-hill: #e2e9d3; --garden-hill-2: #d5e0c3; --garden-grass: #9db887; --garden-soil: #c8ab88; --garden-stem: #6c9659;
+  --garden-leaf: #8db676; --garden-skin: #e6bf9c; --garden-hair: #4a3426; --garden-can: #7ea6c8; --garden-water: #86bde3;
+  --garden-fruit: #df7f4b; --garden-bush: #7ca666; --garden-legs: #3c3a48;
+  --garden-petal-1: #e7a7bb; --garden-petal-2: #b7aef0; --garden-petal-3: #ecc964; --garden-petal-4: #f0a983;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --garden-hill: #232a1f; --garden-hill-2: #1d231a; --garden-grass: #4c6640; --garden-soil: #4a3b2c; --garden-stem: #5f8a4f;
+    --garden-leaf: #6f9a5c; --garden-skin: #d6ad8a; --garden-hair: #2a1d15; --garden-can: #5f88aa; --garden-water: #6aa6cf;
+    --garden-fruit: #d9784a; --garden-bush: #557d47; --garden-legs: #59566a;
+    --garden-petal-1: #d98fa6; --garden-petal-2: #a59cec; --garden-petal-3: #dcb84f; --garden-petal-4: #e39672;
+  }
+}
+:root[data-theme="dark"] {
+  --garden-hill: #232a1f; --garden-hill-2: #1d231a; --garden-grass: #4c6640; --garden-soil: #4a3b2c; --garden-stem: #5f8a4f;
+  --garden-leaf: #6f9a5c; --garden-skin: #d6ad8a; --garden-hair: #2a1d15; --garden-can: #5f88aa; --garden-water: #6aa6cf;
+  --garden-fruit: #d9784a; --garden-bush: #557d47; --garden-legs: #59566a;
+  --garden-petal-1: #d98fa6; --garden-petal-2: #a59cec; --garden-petal-3: #dcb84f; --garden-petal-4: #e39672;
+}
+.garden { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 44vh; pointer-events: none; z-index: 0; transition: opacity 0.8s var(--ease); }
+.intro > *:not(.garden) { position: relative; z-index: 1; }
+.intro[data-step="1"] .garden, .intro[data-step="2"] .garden { opacity: 0.35; }
