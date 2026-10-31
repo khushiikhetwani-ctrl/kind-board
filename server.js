@@ -892,7 +892,7 @@ const SECURITY_HEADERS = {
     "img-src 'self' data: blob:",
     "style-src 'self' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
-    "connect-src 'self'",
+    "connect-src 'self' https://api.open-meteo.com", // optional local weather for the garden sky
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -901,7 +901,7 @@ const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
   'cross-origin-opener-policy': 'same-origin',
-  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(self)', // geolocation only for opt-in weather
 };
 
 const server = http.createServer(async (req, res) => {

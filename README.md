@@ -30,6 +30,7 @@ Every day has its own board. When the day ends, the board is **archived**: anyon
 | Automatic moderation | Clearly harmful posts are refused and count as a **strike** automatically. **2 strikes → paused**: their posts are removed, and new sign-ups from that network pause for 7 days. Put-downs are refused with a prompt to rephrase (no strike). |
 | Waiting for approval | Links, contact details, "DM me on…" and hand-made stickers go up as **waiting for approval**. Only the writer sees them until a moderator approves them on `/admin`. |
 | Reports | A quiet "Report" in each ⋯ menu. Reports never give strikes; 3 of them send a post back for a moderator to review. |
+| Local weather (optional) | The intro sky follows each visitor's own clock. Real weather is opt-in: the browser asks for location, it's rounded to about 10 km, kept only in that browser, and sent only to Open-Meteo (free, no key). Our server never sees it. |
 | Support | Notes that sound like someone is struggling still post, and the writer is shown crisis lines (988, Samaritans, findahelpline.com). |
 | Moderators | `/admin` with your `ADMIN_KEY`: approve or decline waiting posts, keep or remove reported ones (removing adds a strike), restore mistakes. Check it regularly so nobody waits long. |
 

@@ -2,7 +2,7 @@
 // Flow: hello → what this is → kind rules → log in → calendar → a day's board.
 
 import { DOODLES, doodleEl } from './doodles.js';
-import { startGarden, drawCharacter, LOOKS, HAIRSTYLES, randomLook } from './garden.js';
+import { startGarden, drawCharacter, LOOKS, HAIRSTYLES, randomLook, WEATHERS } from './garden.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -159,7 +159,7 @@ async function route() {
     garden?.pause();
   }
   if (view === 'calendar') {
-    if (!visitor) visitor = startGarden($('#visitor'), { mode: 'visit', look: myLook() });
+    if (!visitor) { visitor = startGarden($('#visitor'), { mode: 'visit', look: myLook() }); visitor.setEnv(currentEnv()); }
     else if (S.view !== 'calendar') { visitor.setLook(myLook()); visitor.restart(); }
     visitor.play();
   } else {
@@ -276,7 +276,14 @@ async function helloLoop(run) {
 let garden = null;
 let visitor = null; // the same gardener, popping by on the calendar
 function showIntro() {
-  garden ??= startGarden($('#garden'), { look: S.me?.look });
+  if (!garden) {
+    garden = startGarden($('#garden'), { look: S.me?.look });
+    garden.onSky(({ dark, caption }) => {
+      $('#intro').classList.toggle('sky-dark', dark);
+      $('#skyCaption').textContent = caption;
+    });
+    garden.setEnv(currentEnv());
+  }
   garden.setLook(S.me?.look || null);
   garden.play();
   const step = S.me ? 0 : Number(new URLSearchParams(location.search).get('step')) || 0;
@@ -455,6 +462,94 @@ window.addEventListener('click', (e) => {
     e.preventDefault();
   }
 }, true);
+
+// ---------------------------------------------------------------- sky: your local time of day, and (if you allow it) your weather
+
+const TIME_PRESETS = { auto: null, dawn: 6.3, day: 12, dusk: 18.4, night: 23 };
+const sky = {
+  weather: store.get('kb_weather') || 'live', // 'live' or a fixed WEATHERS value
+  time: store.get('kb_time') || 'auto',
+  live: null, // last weather from Open-Meteo
+};
+try { sky.live = JSON.parse(store.get('kb_live_weather') || 'null'); } catch { /* ignore */ }
+const params = new URLSearchParams(location.search);
+if (WEATHERS.includes(params.get('weather'))) sky.weather = params.get('weather');
+if (params.get('sky') in TIME_PRESETS) sky.time = params.get('sky');
+
+function localHour() {
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60;
+}
+function currentEnv() {
+  const hour = TIME_PRESETS[sky.time] ?? localHour();
+  const weather = sky.weather === 'live' ? (sky.live && Date.now() - sky.live.at < 3 * 3600_000 ? sky.live.weather : 'clear') : sky.weather;
+  return { hour, weather };
+}
+function phaseName(hour) {
+  const h = ((hour % 24) + 24) % 24;
+  return h < 5 || h >= 21 ? 'Night' : h < 8 ? 'Dawn' : h < 17 ? 'Day' : h < 19.5 ? 'Dusk' : 'Evening';
+}
+function refreshSky() {
+  const env = currentEnv();
+  garden?.setEnv(env);
+  visitor?.setEnv(env);
+  const time = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  $('#skyChipText').textContent = `${phaseName(env.hour)} \u00b7 ${env.weather}${sky.time === 'auto' ? ` \u00b7 ${time}` : ''}`;
+}
+// Open-Meteo weather codes → our five skies
+function weatherFromCode(code) {
+  if (code >= 95) return 'storm';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return 'rain';
+  if (code >= 2) return 'cloudy';
+  return 'clear';
+}
+async function fetchLiveWeather() {
+  const geo = JSON.parse(store.get('kb_geo') || 'null');
+  if (!geo) return;
+  try {
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}&current=weather_code`, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+    const data = await res.json();
+    sky.live = { weather: weatherFromCode(Number(data.current?.weather_code ?? 0)), at: Date.now() };
+    store.set('kb_live_weather', JSON.stringify(sky.live));
+    refreshSky();
+  } catch { /* offline or blocked: keep the clear sky */ }
+}
+function useLocalWeather() {
+  if (!navigator.geolocation) return toast('Your browser can\u2019t share a location.');
+  navigator.geolocation.getCurrentPosition((pos) => {
+    // rounded to ~10 km, kept only in this browser
+    store.set('kb_geo', JSON.stringify({ lat: Math.round(pos.coords.latitude * 10) / 10, lon: Math.round(pos.coords.longitude * 10) / 10 }));
+    sky.weather = 'live';
+    store.set('kb_weather', 'live');
+    fetchLiveWeather();
+    renderSkyMenu();
+    toast('Showing the weather where you are.');
+  }, () => toast('No problem. You can still pick a sky by hand.'), { maximumAge: 3600_000, timeout: 10000 });
+}
+function renderSkyMenu() {
+  const hasGeo = !!store.get('kb_geo');
+  $('#skyLocal').setAttribute('aria-pressed', String(hasGeo && sky.weather === 'live'));
+  $('#skyLocal span').textContent = hasGeo ? (sky.weather === 'live' ? 'Using your local weather' : 'Use my local weather') : 'Use my local weather';
+  const opts = (el, values, current, set) => $(el).replaceChildren(...values.map((v) => {
+    const b = h('button', { type: 'button', role: 'radio', 'aria-checked': String(v === current), text: v === 'live' ? (hasGeo ? 'my weather' : 'clear') : v });
+    b.onclick = () => { set(v); renderSkyMenu(); refreshSky(); };
+    return b;
+  }));
+  opts('#skyWeather', ['live', ...WEATHERS.filter((w) => w !== 'clear' || hasGeo)], sky.weather, (v) => { sky.weather = v; store.set('kb_weather', v); });
+  opts('#skyTime', Object.keys(TIME_PRESETS), sky.time, (v) => { sky.time = v; store.set('kb_time', v); });
+}
+$('#skyChip').onclick = (e) => {
+  e.stopPropagation();
+  const menu = $('#skyMenu');
+  if (!menu.hidden) return (menu.hidden = true);
+  renderSkyMenu();
+  placePopover(menu, e.currentTarget);
+};
+$('#skyLocal').onclick = (e) => { e.stopPropagation(); useLocalWeather(); };
+$('#skyMenu').addEventListener('click', (e) => e.stopPropagation());
+setInterval(refreshSky, 60_000); // the sky drifts with your clock
+setInterval(() => { if (sky.weather === 'live') fetchLiveWeather(); }, 30 * 60_000);
 
 // ---------------------------------------------------------------- your character
 
@@ -1422,8 +1517,9 @@ function showMenu(x, y, items) {
 function hidePopovers() {
   $('#menu').hidden = true;
   $('#meMenu').hidden = true;
+  $('#skyMenu').hidden = true;
 }
-document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.popover, [data-me]')) hidePopovers(); });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.popover, [data-me], #skyChip')) hidePopovers(); });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   hidePopovers();
@@ -2073,6 +2169,8 @@ setInterval(() => {
     S.quotes = quoteRes?.quotes || [];
     if (S.me) connectStream();
     await route();
+    refreshSky();
+    if (sky.weather === 'live' && store.get('kb_geo')) fetchLiveWeather();
     setInterval(checkRollover, 60_000);
   } catch (e) {
     toast('Couldn’t reach Kindboard. Check your connection and refresh.', 10000);

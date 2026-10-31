@@ -888,3 +888,27 @@ body.pat-cursor, body.pat-cursor * {
 .look-opt[aria-checked="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--ink); }
 .look-opt.style { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; background: transparent; font-size: 13px; color: var(--ink-2); text-transform: capitalize; }
 .look-opt.style[aria-checked="true"] { color: var(--ink); background: var(--raised); }
+
+/* ============================================================ sky on the hello screen */
+.intro .garden { top: 0; height: 100%; }
+.intro[data-step="1"] .garden, .intro[data-step="2"] .garden { opacity: 0.22; }
+.intro.sky-dark[data-step="0"] {
+  --ink: #f4f0ea; --ink-2: #d8d2e0; --ink-3: #b3adc2; --lav: #b9b4fa; --line: rgba(255, 255, 255, 0.16);
+  color: var(--ink);
+}
+.intro.sky-dark[data-step="0"] .mark { background: #f4f0ea; }
+.intro.sky-dark[data-step="0"] .hello-wrap { text-shadow: 0 2px 24px rgba(10, 14, 40, 0.35); }
+.sky-caption { margin: 10px 0 0; min-height: 1.4em; font-size: 14px; color: var(--ink-2); font-style: italic; transition: opacity 0.6s; }
+.sky-caption:empty { opacity: 0; }
+.sky-chip { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 55%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--ink-2); font: 500 12.5px var(--mono); }
+.sky-chip:hover { color: var(--ink); }
+.sky-menu { width: 300px; padding: 12px; display: grid; gap: 8px; }
+.sky-local { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--field); font-weight: 600; font-size: 14px; text-align: left; }
+.sky-local:hover { border-color: var(--lav); }
+.sky-local[aria-pressed="true"] { border-color: var(--lav); background: var(--lav-soft); }
+.sky-note { font-size: 12px; }
+.sky-menu .label { margin-top: 4px; }
+.sky-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sky-opts button { height: 30px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; font-size: 13px; color: var(--ink-2); text-transform: capitalize; }
+.sky-opts button[aria-checked="true"] { border-color: var(--ink); color: var(--ink); background: var(--raised); }
+@media (max-width: 760px) { .sky-chip span { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }

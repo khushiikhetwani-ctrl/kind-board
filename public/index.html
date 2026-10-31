@@ -64,12 +64,13 @@
     <canvas class="garden" id="garden" aria-hidden="true"></canvas>
     <header class="intro-top">
       <span class="wordmark"><span class="mark" aria-hidden="true"></span>kindboard</span>
-      <div class="top-actions"><button class="icon-btn theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button><button class="ghost-link" id="skipIntro">Skip intro</button></div>
+      <div class="top-actions"><button class="sky-chip" id="skyChip" aria-haspopup="menu" aria-label="Sky and weather"><span id="skyChipText">Sky</span></button><button class="icon-btn theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button><button class="ghost-link" id="skipIntro">Skip intro</button></div>
     </header>
 
     <div class="intro-step" data-step="hello">
       <div class="hello-wrap" aria-live="polite"><span class="hello" id="helloText"></span><span class="caret" aria-hidden="true"></span></div>
       <p class="hello-lang" id="helloLang"></p>
+      <p class="sky-caption" id="skyCaption" aria-live="polite"></p>
       <p class="tap-hint">Click anywhere to continue</p>
     </div>
 
@@ -459,6 +460,14 @@
       <button id="logoutBtn"><svg class="i"><use href="#i-logout"/></svg>Log out</button>
       <button id="logoutAllBtn" class="danger"><svg class="i"><use href="#i-shield"/></svg>Log out on all devices</button>
     </div>
+  </div>
+  <div id="skyMenu" class="popover sky-menu" hidden role="menu">
+    <button class="sky-local" id="skyLocal"><svg class="i"><use href="#i-sun"/></svg><span>Use my local weather</span></button>
+    <p class="hint sky-note">Your rough location stays in this browser and is only sent to Open-Meteo, a free weather service. Never to us.</p>
+    <span class="label">Weather</span>
+    <div class="sky-opts" id="skyWeather"></div>
+    <span class="label">Time of day</span>
+    <div class="sky-opts" id="skyTime"></div>
   </div>
   <div id="menu" class="popover menu-list" hidden role="menu"></div>
   <div id="ghost" class="ghost" hidden aria-hidden="true"></div>
