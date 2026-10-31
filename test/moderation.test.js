@@ -26,3 +26,14 @@ test('word tiles: kind words pass, put-downs and negations do not', () => {
   for (const w of ['sunshine', 'brave', 'Kindness', 'café']) assert.equal(checkTile(w).ok, true, w);
   for (const w of ['ugly', 'stupiiid', 'not', 'never', 'h8', 'kys', 'two words', 'idiots', '<b>']) assert.equal(checkTile(w).ok, false, w);
 });
+
+test('severe vs fixable vs needs approval', () => {
+  assert.equal(checkText('kys').severe, true);
+  assert.equal(checkText('you are so stupid').severe, false);
+  for (const msg of ['check out https://spam.example', 'visit cheapstuff.com now', 'email me at a.b@mail.com', 'call 555 123 4567', 'dm me on insta', 'add me @lonely_otter']) {
+    const r = checkText(msg);
+    assert.equal(r.ok, true, msg);
+    assert.ok(r.hold, msg);
+  }
+  for (const msg of ['I walked 10000 steps today!', 'Is it okay to feel tired? Thanks.', 'Me and my friend went to the park.']) assert.equal(checkText(msg).hold, null, msg);
+});

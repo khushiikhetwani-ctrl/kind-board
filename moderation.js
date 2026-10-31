@@ -83,18 +83,36 @@ const JAB_RE = new RegExp(
   'i',
 );
 
+// Things a filter can't judge on its own: links, contact details and invitations to move
+// the conversation elsewhere. These aren't rejected; they wait for a moderator to approve.
+const LINK_RE = /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|net|org|io|co|me|ly|gg|app|xyz|info|biz|link|site|online|shop)\b/i;
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+const PHONE_RE = /(?:\+?\d[\s().-]*){8,}/;
+const HANDLE_RE = /(?:^|\s)@[a-z0-9_.]{3,}/i;
+const OFFSITE_RE = /\b(?:dm|message|text|call|add|follow|find)\s+me\b|\b(?:snap(?:chat)?|insta(?:gram)?|whats\s?app|telegram|discord|kik|tiktok|onlyfans)\b/i;
+
+function holdReason(text) {
+  if (LINK_RE.test(text)) return 'it has a link';
+  if (EMAIL_RE.test(text) || PHONE_RE.test(text) || HANDLE_RE.test(text)) return 'it looks like it has contact details';
+  if (OFFSITE_RE.test(text)) return 'it mentions moving the chat elsewhere';
+  return null;
+}
+
 /**
- * @returns {{ ok: true, support: boolean } | { ok: false, reason: string }}
+ * ok:false + severe:true  → clearly harmful: blocked and counts as a strike.
+ * ok:false + severe:false → unkind but fixable: blocked, the writer can rephrase.
+ * ok:true + hold          → can't be judged automatically: waits for approval.
+ * @returns {{ ok: true, support: boolean, hold: string|null } | { ok: false, severe: boolean, reason: string }}
  */
 export function checkText(text) {
   const t = normalize(text);
   if (HARD_RE.test(t)) {
-    return { ok: false, reason: 'This note contains words that could hurt someone. Kindboard is a gentle place. Try saying it another way.' };
+    return { ok: false, severe: true, reason: 'This contains words that could really hurt someone, so it wasn\u2019t posted.' };
   }
   if (DIRECTED_RE.test(t) || JAB_RE.test(t)) {
-    return { ok: false, reason: 'This reads as belittling someone. Disagreeing is fine, but putting people down isn’t. Try rephrasing?' };
+    return { ok: false, severe: false, reason: 'This reads as putting someone down. Disagreeing is fine, but try saying it more kindly?' };
   }
-  return { ok: true, support: SUPPORT_RE.test(t) };
+  return { ok: true, support: SUPPORT_RE.test(t), hold: holdReason(String(text)) };
 }
 
 // A single custom word-play tile. Stricter than notes: on its own a tile has no

@@ -13,7 +13,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:ital,wght@0,400;0,500;0,600;1,400&display=swap">
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -49,6 +49,11 @@
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM20 17v4H6.5A2.5 2.5 0 0 1 4 18.5"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+      <symbol id="i-squiggle" viewBox="0 0 24 24"><path d="M3 15c2-6 4-6 5 0s3 6 5 0 3-6 5 0 2 4 3 2"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
       <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
       <symbol id="i-return" viewBox="0 0 24 24"><path d="M9 10 4 15l5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
     </defs>
@@ -58,7 +63,7 @@
   <section id="intro" class="view intro" aria-label="Welcome">
     <header class="intro-top">
       <span class="wordmark"><span class="mark" aria-hidden="true"></span>kindboard</span>
-      <button class="ghost-link" id="skipIntro">Skip intro</button>
+      <div class="top-actions"><button class="icon-btn theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button><button class="ghost-link" id="skipIntro">Skip intro</button></div>
     </header>
 
     <div class="intro-step" data-step="hello">
@@ -88,17 +93,7 @@
         <li><span>3</span><div><b>Stay anonymous.</b> Don't share names, numbers or addresses, yours or anyone's.</div></li>
         <li><span>4</span><div><b>No spam or ads.</b> This is a place for people, not selling.</div></li>
       </ol>
-      <div class="consequence">
-        <p class="eyebrow">If someone breaks them</p>
-        <div class="steps">
-          <div class="cstep"><svg class="i"><use href="#i-flag"/></svg><span>People flag the post</span></div>
-          <span class="cstep-arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></span>
-          <div class="cstep"><svg class="i"><use href="#i-trash"/></svg><span>It's removed and the writer gets a strike</span></div>
-          <span class="cstep-arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></span>
-          <div class="cstep"><svg class="i"><use href="#i-shield"/></svg><span>2 strikes and that identity is paused. It can read, but not post</span></div>
-        </div>
-        <p class="hint">Hurtful words are also stopped automatically, before they're ever posted.</p>
-      </div>
+      <p class="consequence simple"><svg class="i"><use href="#i-shield"/></svg><span>Every note is checked before it goes up. Anything unkind doesn't get posted, and anything unclear waits for a quick approval.</span></p>
       <button class="pill-cta" id="agreeBtn"><span>I agree, let me in</span><span class="pill-arrow"><svg class="i"><use href="#i-arrow"/></svg></span></button>
     </div>
 
@@ -119,6 +114,7 @@
   <section id="auth" class="view auth" aria-label="Log in">
     <div class="auth-panel">
       <button class="ghost-link back" data-go="/"><svg class="i"><use href="#i-left"/></svg>Back</button>
+      <div class="auth-theme"><button class="icon-btn theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button></div>
       <div class="auth-col">
         <span class="mark lg" aria-hidden="true"></span>
 
@@ -130,33 +126,33 @@
             <button type="button" class="icon-btn" id="rerollAnimal" aria-label="Pick a different animal"><svg class="i"><use href="#i-shuffle"/></svg></button>
           </div>
           <div class="pass-field">
-            <input type="password" id="newPass" class="field" placeholder="Choose a passphrase" autocomplete="new-password" minlength="10" maxlength="200" required aria-describedby="passHint" aria-label="Choose a passphrase">
-            <button type="button" class="icon-btn reveal" aria-label="Show passphrase"><svg class="i"><use href="#i-eye"/></svg></button>
+            <input type="password" id="newPass" class="field" placeholder="Create a password" autocomplete="new-password" minlength="10" maxlength="200" required aria-describedby="passHint" aria-label="Create a password">
+            <button type="button" class="icon-btn reveal" aria-label="Show password"><svg class="i"><use href="#i-eye"/></svg></button>
           </div>
           <div class="meter" aria-hidden="true"><i></i></div>
-          <p class="hint" id="passHint">10+ characters. A little sentence is easiest to remember.</p>
+          <p class="hint" id="passHint">At least 10 characters. A few words like "tea on rainy sundays" are easy to remember.</p>
           <label class="check"><input type="checkbox" id="rememberNew" checked><span>Keep me signed in on this device</span></label>
-          <label class="check"><input type="checkbox" id="agree"><span>I'll be kind. Hurtful posts get removed; 2 strikes pause an identity.</span></label>
+          <label class="check"><input type="checkbox" id="agree"><span>I'll be kind.</span></label>
           <p class="form-error" hidden></p>
           <button class="btn lav block" type="submit"><span class="btn-label">Create my identity</span><span class="spinner" aria-hidden="true"></span></button>
           <p class="switch">Been here before? <button type="button" class="link-btn" data-mode="return">Log in</button></p>
         </form>
 
         <form id="loginForm" class="auth-form" autocomplete="on" hidden novalidate>
-          <div class="auth-title"><h1>Welcome back</h1><p>Log in with your handle and passphrase.</p></div>
+          <div class="auth-title"><h1>Welcome back</h1><p>Log in with your handle and password.</p></div>
           <input id="loginHandle" class="field" autocomplete="username" placeholder="Handle, e.g. otter-2841" autocapitalize="none" spellcheck="false" required aria-label="Handle">
           <div class="pass-field">
-            <input type="password" id="loginPass" class="field" placeholder="Passphrase" autocomplete="current-password" required aria-label="Passphrase">
-            <button type="button" class="icon-btn reveal" aria-label="Show passphrase"><svg class="i"><use href="#i-eye"/></svg></button>
+            <input type="password" id="loginPass" class="field" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+            <button type="button" class="icon-btn reveal" aria-label="Show password"><svg class="i"><use href="#i-eye"/></svg></button>
           </div>
           <label class="check"><input type="checkbox" id="rememberLogin" checked><span>Keep me signed in on this device</span></label>
           <p class="form-error" hidden></p>
           <button class="btn lav block" type="submit"><span class="btn-label">Log in</span><span class="spinner" aria-hidden="true"></span></button>
           <p class="switch">New here? <button type="button" class="link-btn" data-mode="new">Create an identity</button></p>
-          <p class="hint center">Passphrases can't be recovered. That's what keeps you anonymous.</p>
+          <p class="hint center">Passwords can't be recovered. That's what keeps you anonymous.</p>
         </form>
 
-        <p class="secure-note"><svg class="i"><use href="#i-lock"/></svg>Passphrases are hashed with scrypt. Sessions use HttpOnly, same-site cookies.</p>
+        <p class="secure-note"><svg class="i"><use href="#i-lock"/></svg>Your password is stored scrambled, so nobody can read it, not even us.</p>
       </div>
     </div>
   </section>
@@ -167,6 +163,7 @@
       <button class="wordmark link" data-go="/calendar"><span class="mark" aria-hidden="true"></span>kindboard</button>
       <div class="top-actions">
         <span class="presence hide-sm"><i></i><span class="presence-n">1</span>&nbsp;here now</span>
+        <button class="icon-btn theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button>
         <button class="me-chip" data-me><span class="avatar"></span><span class="me-name hide-sm"></span></button>
       </div>
     </header>
@@ -208,7 +205,7 @@
 
   <!-- ============ 4. Board ============ -->
   <section id="board" class="view board-view" aria-label="Board">
-    <main id="viewport" aria-label="Sticky note board"><div id="world"><div id="cursors" aria-hidden="true"></div></div></main>
+    <main id="viewport" aria-label="Sticky note board"><div id="world"><div id="noteLayer"></div><div id="stickerLayer"></div><div id="cursors" aria-hidden="true"></div></div></main>
 
     <div id="empty" class="empty" hidden>
       <p class="serif empty-title"></p>
@@ -224,6 +221,7 @@
       </div>
       <div class="top-actions">
         <span class="presence hide-sm"><i></i><span class="presence-n">1</span>&nbsp;here</span>
+        <button class="chip-btn round theme-btn" data-theme-toggle aria-label="Switch light or dark theme"><svg class="i"><use href="#i-moon"/></svg></button>
         <button class="chip-btn hide-xs" id="shareBtn" aria-label="Share this board"><svg class="i"><use href="#i-share"/></svg><span class="hide-sm">Share</span></button>
         <button class="me-chip" data-me><span class="avatar"></span><span class="me-name hide-sm"></span></button>
       </div>
@@ -246,12 +244,33 @@
       <button id="newNoteBtn" class="btn primary"><svg class="i"><use href="#i-plus"/></svg>Write a note</button>
       <button class="btn subtle" data-tray="words" aria-controls="tray"><svg class="i"><use href="#i-type"/></svg><span class="hide-xs">Words</span></button>
       <button class="btn subtle" data-tray="stickers" aria-controls="tray"><svg class="i"><use href="#i-sticker"/></svg><span class="hide-xs">Stickers</span></button>
+      <button class="btn subtle" id="drawBtn" aria-pressed="false"><svg class="i"><use href="#i-squiggle"/></svg><span class="hide-xs">Draw</span></button>
       <span class="dock-sep hide-sm"></span>
       <button id="zoomOut" class="icon-btn hide-sm" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
       <button id="surfaceBtn" class="icon-btn" aria-label="Change the board surface" title="Board surface"><svg class="i"><use href="#i-layers"/></svg></button>
-      <button id="zoomReset" class="icon-btn" aria-label="Fit to screen"><svg class="i"><use href="#i-fit"/></svg></button>
+      <button id="zoomReset" class="zoom-pct" aria-label="Zoom level. Click to fit everything">100%</button>
       <button id="zoomIn" class="icon-btn hide-sm" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
     </nav>
+
+    <button class="chip-btn list-btn" id="listBtn" aria-expanded="false"><svg class="i"><use href="#i-list"/></svg>View as list</button>
+    <div class="minimap" id="minimap" aria-label="Map of the board. Click to jump there." role="button" tabindex="0"><canvas width="336" height="252"></canvas></div>
+    <aside class="list-panel" id="listPanel" hidden aria-label="Notes as a list">
+      <div class="list-head"><span class="label" id="listLabel">Notes</span><button class="icon-btn" id="listClose" aria-label="Close list"><svg class="i"><use href="#i-x"/></svg></button></div>
+      <ol class="list-items" id="listItems"></ol>
+    </aside>
+
+    <div id="penBar" class="pen-bar" hidden role="toolbar" aria-label="Drawing">
+      <div class="pen-colors" role="radiogroup" aria-label="Line color"></div>
+      <span class="dock-sep"></span>
+      <div class="pen-sizes" role="radiogroup" aria-label="Line thickness">
+        <button class="pen-size" data-w="3" aria-label="Thin" aria-checked="false" role="radio"><i></i></button>
+        <button class="pen-size" data-w="6" aria-label="Medium" aria-checked="true" role="radio"><i></i></button>
+        <button class="pen-size" data-w="11" aria-label="Thick" aria-checked="false" role="radio"><i></i></button>
+      </div>
+      <span class="dock-sep"></span>
+      <span class="pen-hint">Drag on the board to draw</span>
+      <button class="btn sm primary" id="penDone">Done</button>
+    </div>
 
     <section id="tray" class="tray" hidden aria-label="Decorate">
       <div class="tray-head">
@@ -318,7 +337,7 @@
     <form method="dialog">
       <div class="avatar xl" id="savedAvatar"></div>
       <h2 class="serif">Welcome, <span id="savedName"></span>.</h2>
-      <p class="muted">This is your handle. You'll need it, with your passphrase, to log in on another device. Write it down somewhere safe.</p>
+      <p class="muted">This is your handle. You'll need it, with your password, to log in again or on another device. Write it down somewhere safe.</p>
       <div class="handle-box"><code id="savedHandle"></code><button type="button" class="btn sm subtle" data-copy-handle><svg class="i"><use href="#i-copy"/></svg>Copy</button></div>
       <div class="dlg-actions"><button class="btn primary" value="ok">Continue to the calendar<svg class="i"><use href="#i-arrow"/></svg></button></div>
     </form>
@@ -360,8 +379,8 @@
       <li><b>Lead with kindness.</b> Many people come here because they're lonely or having a hard day.</li>
       <li><b>No hate, harassment or put-downs.</b> Slurs, threats and belittling words are blocked automatically.</li>
       <li><b>Never tell someone to hurt themselves.</b> Ever.</li>
-      <li><b>Flag what feels wrong.</b> When several people flag a post, it's removed and its author gets a strike.</li>
-      <li><b>Two strikes pause an identity.</b> It can still read, but can't post, reply or decorate.</li>
+      <li><b>Everything is checked automatically.</b> Unkind posts aren't published. Links and contact details wait for a quick approval.</li>
+      <li><b>Seriously hurtful posts count as strikes.</b> Two strikes pause an identity: it can still read, but not post.</li>
       <li><b>Stay anonymous.</b> Don't share personal details, yours or anyone else's.</li>
     </ol>
     <p class="support-line">If you're struggling right now, you deserve real support. In the US call or text <b>988</b>. In the UK &amp; Ireland call Samaritans on <b>116 123</b>. Elsewhere, <b>findahelpline.com</b> lists free, confidential lines.</p>
@@ -369,8 +388,8 @@
 
   <dialog id="flagDlg" class="dlg">
     <form id="flagForm">
-      <div class="dlg-head"><h2 class="serif">Flag this</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
-      <p class="muted">Thank you for looking out for others. What's wrong with it?</p>
+      <div class="dlg-head"><h2 class="serif">Report this</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+      <p class="muted">Our checks catch most things, but not everything. A moderator will take a look.</p>
       <div class="reasons">
         <label><input type="radio" name="reason" value="hurtful" checked><span>Hurtful or belittling</span></label>
         <label><input type="radio" name="reason" value="harassment"><span>Harassment or bullying</span></label>
@@ -381,7 +400,7 @@
         <label><input type="radio" name="reason" value="other"><span>Something else</span></label>
       </div>
       <p class="form-error" hidden></p>
-      <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button class="btn danger" type="submit">Flag</button></div>
+      <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button class="btn danger" type="submit">Send report</button></div>
     </form>
   </dialog>
 

@@ -20,15 +20,17 @@ async function load() {
   try {
     const { items } = await api('GET', '/api/admin/flags');
     const list = $('#list');
-    if (!items.length) return list.replaceChildren(el('p', 'hint', 'Nothing flagged right now. 🌿'));
+    if (!items.length) return list.replaceChildren(el('p', 'hint', 'Nothing waiting and no reports. All clear.'));
     list.replaceChildren(...items.map((it) => {
       const card = el('article', `mod-item${it.hidden ? ' is-hidden' : ''}`);
       const meta = el('div', 'mod-meta');
-      const status = it.hidden === 1 ? 'removed' : it.hidden === 2 ? 'deleted by author' : 'visible';
-      for (const [t, bad] of [[it.type, false], [it.day, false], [`${it.flags} flag${it.flags === 1 ? '' : 's'}`, true], [it.reasons.join(', '), true],
-        [status, it.hidden === 1], [`by ${it.author} · ${it.authorStrikes} strike(s)${it.authorBanned ? ' · paused' : ''}`, it.authorBanned]]) {
-        meta.append(el('span', `tag${bad ? ' bad' : ''}`, t));
-      }
+      const status = it.pending ? 'waiting for approval' : it.hidden === 1 ? 'removed' : it.hidden === 2 ? 'deleted by author' : 'visible';
+      const tags = [[it.type, false], [it.day, false], [status, it.pending || it.hidden === 1]];
+      if (it.why) tags.push([`held because ${it.why}`, false]);
+      if (it.kind === 'image') tags.push(['hand-made sticker', false]);
+      if (it.flags) tags.push([`${it.flags} report${it.flags === 1 ? '' : 's'}: ${it.reasons.join(', ')}`, true]);
+      tags.push([`by ${it.author} · ${it.authorStrikes} strike(s)${it.authorBanned ? ' · paused' : ''}`, it.authorBanned]);
+      for (const [t, bad] of tags) meta.append(el('span', `tag${bad ? ' bad' : ''}`, t));
       let body;
       if (it.text != null) body = el('p', 'mod-text', it.text);
       else if (it.kind === 'emoji' || it.kind === 'word') body = el('div', 'mod-emoji', it.content);
@@ -39,9 +41,16 @@ async function load() {
         b.onclick = async () => { try { await api('POST', '/api/admin/resolve', { type: it.type, id: it.id, action }); load(); } catch (e) { alert(e.message); } };
         actions.append(b);
       };
-      if (it.hidden !== 1) act('Remove + strike', 'remove', 'danger');
-      if (it.hidden === 1) act('Restore', 'restore');
-      if (it.hidden === 0) act('Dismiss flags', 'dismiss', 'ghost');
+      if (it.pending) {
+        act('Approve', 'approve', 'primary');
+        act('Decline', 'decline');
+        act('Decline + strike', 'remove', 'danger');
+      } else if (it.hidden === 0) {
+        act('Keep it (dismiss reports)', 'dismiss');
+        act('Remove + strike', 'remove', 'danger');
+      } else if (it.hidden === 1) {
+        act('Restore', 'restore');
+      }
       card.append(meta, body, actions);
       return card;
     }));

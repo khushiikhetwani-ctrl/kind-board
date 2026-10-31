@@ -147,6 +147,8 @@ async function route() {
     view = 'calendar';
   }
   if (view !== 'board') {
+    setPen(false);
+    closeList();
     closeThread(false);
     closeTray();
     stopPlacing();
@@ -338,7 +340,7 @@ for (const b of $$('.reveal')) {
   b.onclick = () => {
     const input = b.previousElementSibling;
     input.type = input.type === 'password' ? 'text' : 'password';
-    b.setAttribute('aria-label', input.type === 'password' ? 'Show passphrase' : 'Hide passphrase');
+    b.setAttribute('aria-label', input.type === 'password' ? 'Show password' : 'Hide password');
   };
 }
 function strength(p) {
@@ -393,8 +395,8 @@ async function submitWith(form, fn) {
 $('#signupForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const form = e.target;
-  if ($('#newPass').value.length < 10) return showError(form, 'Use at least 10 characters. A little sentence works well.');
-  if (!$('#agree').checked) return showError(form, 'Please agree to keep it kind.');
+  if ($('#newPass').value.length < 10) return showError(form, 'Use at least 10 characters. A few words work well.');
+  if (!$('#agree').checked) return showError(form, 'Please tick \u201cI\u2019ll be kind\u201d to continue.');
   submitWith(form, async () => {
     const { me } = await api('POST', '/api/signup', { animal: S.signupAnimal, passphrase: $('#newPass').value, remember: $('#rememberNew').checked });
     await afterLogin(me, { fresh: true });
@@ -638,6 +640,8 @@ $('#calNext').onclick = () => shiftMonth(1);
 
 const viewport = $('#viewport');
 const world = $('#world');
+const noteLayer = $('#noteLayer');
+const stickerLayer = $('#stickerLayer'); // above the notes, so stickers can go on top of them
 
 async function showBoard(day) {
   renderMe();
@@ -688,9 +692,11 @@ function updateTools() {
   const ok = canPost();
   $('#newNoteBtn').disabled = !ok;
   for (const b of $$('[data-tray]')) b.disabled = !ok;
+  $('#drawBtn').disabled = !ok;
   if (!ok) {
     closeTray();
     stopPlacing();
+    setPen(false);
   }
 }
 
@@ -737,6 +743,7 @@ function upsertNote(n) {
       tape.style.setProperty('--tape-rot', `${(hv % 9) - 4}deg`);
       el.prepend(tape);
     }
+    el.append(h('span', { class: 'sel', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'), h('span', { class: 'sel-tag' })));
     el.classList.add(`paper-${n.paper || 'plain'}`, `hold-${fastener}`);
     if (hv % 3 === 0) el.classList.add('curl');
     el.style.setProperty('--fd', `${6 + (hv % 5)}s`);
@@ -744,11 +751,12 @@ function upsertNote(n) {
     bindDraggable(el, 'note');
     el.addEventListener('animationend', (e) => { if (e.animationName === 'settle') el.classList.remove('fresh'); });
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openThread(n.id); } });
-    world.append(el);
+    noteLayer.append(el);
     S.noteEls.set(n.id, el);
   }
   el.dataset.color = n.color;
   el.dataset.size = noteSize(n.text);
+  el.classList.toggle('pending', !!n.pending);
   el.style.left = `${n.x}px`;
   el.style.top = `${n.y}px`;
   el.style.setProperty('--rot', `${n.rot}deg`);
@@ -759,8 +767,13 @@ function upsertNote(n) {
   t.dateTime = new Date(n.createdAt).toISOString();
   $('.note-text', el).textContent = n.text;
   const rc = n.replyCount;
-  $('.replies', el).replaceChildren(icon('message'), rc ? `${rc} ${rc === 1 ? 'reply' : 'replies'}` : S.archived ? 'No replies' : 'Write back');
+  $('.replies', el).replaceChildren(...(n.pending
+    ? [icon('clock'), 'Waiting for approval']
+    : [icon('message'), rc ? `${rc} ${rc === 1 ? 'reply' : 'replies'}` : S.archived ? 'No replies' : 'Write back']));
+  $('.sel-tag', el).textContent = n.pending ? `${displayName(n)} \u00b7 waiting` : `${displayName(n)} \u00b7 ${rc} ${rc === 1 ? 'reply' : 'replies'}`;
   el.setAttribute('aria-label', `Note from ${displayName(n)}: ${n.text.slice(0, 80)}`);
+  scheduleMinimap();
+  if (!$('#listPanel').hidden) renderList();
   return el;
 }
 
@@ -773,17 +786,18 @@ function upsertSticker(s) {
     if (s.kind === 'doodle') el.append(doodleEl(s.content));
     else if (s.kind === 'emoji') el.append(h('span', { class: 'emo', text: s.content }));
     else if (s.kind === 'word') el.textContent = s.content;
+    else if (s.kind === 'line') el.append(lineSvg(JSON.parse(s.content)));
     else el.append(h('img', { src: s.content, alt: 'A sticker someone made', draggable: 'false' }));
-    el.setAttribute('aria-label', s.kind === 'image' ? 'Hand-made sticker' : s.content);
+    el.setAttribute('aria-label', s.kind === 'image' ? 'Hand-made sticker' : s.kind === 'line' ? 'A drawn line' : s.content);
     bindDraggable(el, 'sticker');
-    // emoji & drawings sit under notes; word tiles sit on top so sentences stay readable
-    if (s.kind === 'word') world.append(el);
-    else world.prepend(el);
+    stickerLayer.append(el);
     S.stickerEls.set(s.id, el);
   }
+  el.classList.toggle('pending', !!s.pending);
+  el.title = s.pending ? 'Waiting for approval. Only you can see this for now.' : '';
   el.style.left = `${s.x}px`;
   el.style.top = `${s.y}px`;
-  if (s.kind !== 'word') {
+  if (s.kind !== 'word' && s.kind !== 'line') {
     el.style.width = el.style.height = `${s.size}px`;
     el.style.fontSize = `${s.size * 0.8}px`;
   }
@@ -791,7 +805,118 @@ function upsertSticker(s) {
   return el;
 }
 
+// ---------------------------------------------------------------- squiggly lines
+
+const LINE_PAD = 10;
+function linePath(pts) {
+  if (pts.length < 3) return `M${pts.map((p) => p.join(',')).join(' L')}`;
+  // smooth curve through the midpoints, so freehand lines look soft rather than jagged
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i][0] + pts[i + 1][0]) / 2;
+    const my = (pts[i][1] + pts[i + 1][1]) / 2;
+    d += ` Q${pts[i][0]},${pts[i][1]} ${mx},${my}`;
+  }
+  const last = pts[pts.length - 1];
+  return `${d} L${last[0]},${last[1]}`;
+}
+function lineSvg({ p, c, w }) {
+  const maxX = Math.max(...p.map((pt) => pt[0]));
+  const maxY = Math.max(...p.map((pt) => pt[1]));
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('width', maxX + LINE_PAD * 2);
+  svg.setAttribute('height', maxY + LINE_PAD * 2);
+  svg.setAttribute('viewBox', `${-LINE_PAD} ${-LINE_PAD} ${maxX + LINE_PAD * 2} ${maxY + LINE_PAD * 2}`);
+  const d = linePath(p);
+  const hit = document.createElementNS(SVG, 'path'); // wider invisible stroke, easier to grab
+  hit.setAttribute('d', d);
+  hit.setAttribute('class', 'line-hit');
+  hit.setAttribute('stroke-width', w + 14);
+  const ink = document.createElementNS(SVG, 'path');
+  ink.setAttribute('d', d);
+  ink.setAttribute('class', 'line-ink');
+  ink.setAttribute('stroke', c);
+  ink.setAttribute('stroke-width', w);
+  svg.append(hit, ink);
+  return svg;
+}
+
+const pen = { on: false, color: null, w: 6, stroke: null };
+function setPen(on) {
+  pen.on = on && canPost();
+  $('#penBar').hidden = !pen.on;
+  $('#drawBtn').setAttribute('aria-pressed', String(pen.on));
+  viewport.classList.toggle('drawing', pen.on);
+  if (pen.on) {
+    closeTray();
+    closeThread();
+    stopPlacing();
+  }
+}
+$('#drawBtn').onclick = () => setPen(!pen.on);
+$('#penDone').onclick = () => setPen(false);
+for (const b of $$('.pen-size')) {
+  b.onclick = () => {
+    pen.w = Number(b.dataset.w);
+    for (const o of $$('.pen-size')) o.setAttribute('aria-checked', String(o === b));
+  };
+}
+function renderPenColors() {
+  pen.color = pen.color || S.cfg.lineColors[0];
+  $('.pen-colors').replaceChildren(...S.cfg.lineColors.map((c) => {
+    const b = h('button', { type: 'button', class: 'swatch', role: 'radio', 'aria-label': `Color ${c}`, 'aria-checked': String(c === pen.color) });
+    b.style.background = c;
+    b.onclick = () => {
+      pen.color = c;
+      for (const o of $$('.pen-colors .swatch')) o.setAttribute('aria-checked', String(o === b));
+    };
+    return b;
+  }));
+}
+function penDown(e) {
+  const p = toWorld(e.clientX, e.clientY);
+  const live = document.createElementNS(SVG, 'svg');
+  live.setAttribute('class', 'line-live');
+  const path = document.createElementNS(SVG, 'path');
+  path.setAttribute('stroke', pen.color);
+  path.setAttribute('stroke-width', pen.w);
+  live.append(path);
+  stickerLayer.append(live);
+  pen.stroke = { pts: [[p.x, p.y]], live, path };
+  viewport.setPointerCapture(e.pointerId);
+}
+function penMove(e) {
+  if (!pen.stroke) return;
+  const p = toWorld(e.clientX, e.clientY);
+  const last = pen.stroke.pts[pen.stroke.pts.length - 1];
+  if (Math.hypot(p.x - last[0], p.y - last[1]) < 2.5) return;
+  pen.stroke.pts.push([p.x, p.y]);
+  pen.stroke.path.setAttribute('d', linePath(pen.stroke.pts));
+}
+async function penUp() {
+  const st = pen.stroke;
+  pen.stroke = null;
+  if (!st) return;
+  let pts = st.pts;
+  if (pts.length < 2) { st.live.remove(); return; }
+  if (pts.length > 600) pts = pts.filter((_, i) => i % Math.ceil(pts.length / 600) === 0);
+  const minX = Math.min(...pts.map((p) => p[0]));
+  const minY = Math.min(...pts.map((p) => p[1]));
+  const rel = pts.map(([x, y]) => [Math.round(x - minX), Math.round(y - minY)]);
+  try {
+    const { sticker } = await api('POST', '/api/stickers', { kind: 'line', content: { p: rel, c: pen.color, w: pen.w }, x: minX, y: minY });
+    upsertSticker(sticker);
+  } catch (err) {
+    toast(err.message);
+    handlePostErrors(err);
+  } finally {
+    st.live.remove();
+  }
+}
+
 function removeItem(type, id) {
+  scheduleMinimap();
+  if (!$('#listPanel').hidden && type === 'note') setTimeout(renderList);
   if (type === 'note') {
     S.noteEls.get(id)?.remove();
     S.noteEls.delete(id);
@@ -818,7 +943,87 @@ function applyCam() {
   const { x, y, z } = S.cam;
   world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${z})`;
   world.style.setProperty('--inv', 1 / z); // keeps cursor name tags the same size at any zoom
+  $('#zoomReset').textContent = `${Math.round(z * 100)}%`;
+  scheduleMinimap();
 }
+
+// ---------------------------------------------------------------- minimap
+
+const NOTE_FILL = { butter: '--n-butter', blush: '--n-blush', lime: '--n-lime', lilac: '--n-lilac', sky: '--n-sky', peach: '--n-peach' };
+let miniQueued = false;
+function scheduleMinimap() {
+  if (miniQueued) return;
+  miniQueued = true;
+  requestAnimationFrame(drawMinimap);
+}
+function miniFrame() {
+  // frame the area that has content (plus the current view), not the whole huge board
+  const notes = [...S.notes.values()];
+  const tl = toWorld(0, 0);
+  const br = toWorld(innerWidth, innerHeight);
+  const xs = [tl.x, br.x, ...notes.flatMap((n) => [n.x, n.x + 290])];
+  const ys = [tl.y, br.y, ...notes.flatMap((n) => [n.y, n.y + 270])];
+  const pad = 120;
+  return { x0: Math.min(...xs) - pad, y0: Math.min(...ys) - pad, x1: Math.max(...xs) + pad, y1: Math.max(...ys) + pad, tl, br };
+}
+function drawMinimap() {
+  miniQueued = false;
+  const canvas = $('#minimap canvas');
+  if (!S.cfg || S.view !== 'board' || !canvas.offsetParent) return;
+  const ctx2 = canvas.getContext('2d');
+  const f = miniFrame();
+  const k = Math.min(canvas.width / (f.x1 - f.x0), canvas.height / (f.y1 - f.y0));
+  const ox = (canvas.width - (f.x1 - f.x0) * k) / 2;
+  const oy = (canvas.height - (f.y1 - f.y0) * k) / 2;
+  S.mini = { f, k, ox, oy };
+  const css = getComputedStyle(document.documentElement);
+  ctx2.clearRect(0, 0, canvas.width, canvas.height);
+  for (const n of S.notes.values()) {
+    ctx2.fillStyle = css.getPropertyValue(NOTE_FILL[n.color] || '--n-butter').trim() || '#fbf0c4';
+    ctx2.fillRect(ox + (n.x - f.x0) * k, oy + (n.y - f.y0) * k, NOTE_W[noteSize(n.text)] * k, 230 * k);
+  }
+  ctx2.strokeStyle = css.getPropertyValue('--lav').trim() || '#8f88ee';
+  ctx2.lineWidth = 3;
+  ctx2.strokeRect(ox + (f.tl.x - f.x0) * k, oy + (f.tl.y - f.y0) * k, (f.br.x - f.tl.x) * k, (f.br.y - f.tl.y) * k);
+}
+$('#minimap').addEventListener('click', (e) => {
+  if (!S.mini) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const cx = ((e.clientX - r.left) / r.width) * $('#minimap canvas').width;
+  const cy = ((e.clientY - r.top) / r.height) * $('#minimap canvas').height;
+  const { f, k, ox, oy } = S.mini;
+  animateCam(camFor(f.x0 + (cx - ox) / k, f.y0 + (cy - oy) / k, S.cam.z), 500);
+});
+
+// ---------------------------------------------------------------- list view
+
+function renderList() {
+  const notes = [...S.notes.values()].sort((a, b) => b.createdAt - a.createdAt);
+  $('#listLabel').textContent = `${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`;
+  $('#listItems').replaceChildren(...(notes.length ? notes.map((n) => {
+    const bar = h('span', { class: 'swatch-bar' });
+    bar.dataset.color = n.color;
+    const rc = n.replyCount;
+    return h('li', {}, h('button', { class: 'list-item', type: 'button', onclick: () => {
+      if (innerWidth < 760) closeList();
+      animateCam(camFor(n.x + 130 + (innerWidth > 760 ? 210 : 0), n.y + 110, Math.max(S.cam.z, 0.9)));
+      openThread(n.id);
+    } }, bar, h('div', {}, h('b', {}, displayName(n), h('span', { text: n.pending ? 'waiting' : `${rc} ${rc === 1 ? 'reply' : 'replies'}` })), h('p', { text: n.text }))));
+  }) : [h('li', { class: 'no-replies', text: 'No notes on this day yet.' })]));
+}
+function closeList() {
+  $('#listPanel').hidden = true;
+  $('#listBtn').setAttribute('aria-expanded', 'false');
+}
+$('#listBtn').onclick = () => {
+  const panel = $('#listPanel');
+  if (!panel.hidden) return closeList();
+  closeTray();
+  renderList();
+  panel.hidden = false;
+  $('#listBtn').setAttribute('aria-expanded', 'true');
+};
+$('#listClose').onclick = closeList;
 
 // ---------------------------------------------------------------- live cursors
 
@@ -875,6 +1080,34 @@ function clearCursors() {
 }
 
 // ---------------------------------------------------------------- board surface (per viewer)
+
+const prefersDark = matchMedia('(prefers-color-scheme: dark)');
+function currentTheme() {
+  return document.documentElement.dataset.theme || (prefersDark.matches ? 'dark' : 'light');
+}
+function paintThemeButtons() {
+  const dark = currentTheme() === 'dark';
+  for (const b of $$('[data-theme-toggle]')) {
+    b.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+    b.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    b.title = dark ? 'Light theme' : 'Dark theme';
+  }
+}
+function setTheme(theme) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  paintThemeButtons();
+}
+setTheme(store.get('kb_theme'));
+prefersDark.addEventListener('change', paintThemeButtons);
+for (const b of $$('[data-theme-toggle]')) {
+  b.onclick = (e) => {
+    e.stopPropagation();
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    store.set('kb_theme', next);
+    setTheme(next);
+  };
+}
 
 const SURFACES = ['dots', 'cork', 'plain'];
 function setSurface(name) {
@@ -940,6 +1173,7 @@ viewport.addEventListener('pointerdown', (e) => {
   cancelAnimationFrame(momentum);
   hidePopovers();
   if (S.placing) return placeAt(e.clientX, e.clientY);
+  if (pen.on) return penDown(e);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   viewport.setPointerCapture(e.pointerId);
   if (pointers.size === 2) {
@@ -952,6 +1186,7 @@ viewport.addEventListener('pointerdown', (e) => {
   }
 });
 viewport.addEventListener('pointermove', (e) => {
+  if (pen.stroke) return penMove(e);
   if (!pointers.has(e.pointerId)) return;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch && pointers.size === 2) {
@@ -970,6 +1205,7 @@ viewport.addEventListener('pointermove', (e) => {
   }
 });
 const endPointer = (e) => {
+  if (pen.stroke) return penUp();
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
   if (!pointers.size) {
@@ -1018,12 +1254,16 @@ function bindDraggable(el, type) {
     e.stopPropagation();
     hidePopovers();
     if (S.placing) return placeAt(e.clientX, e.clientY);
+    if (pen.on) return penDown(e);
     const item = (type === 'note' ? S.notes : S.stickers).get(el.dataset.id);
-    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: item.mine && canPost(), lx: e.clientX, swing: 0 };
+    // Anyone can rearrange today's notes; stickers, words and lines move only for whoever placed them.
+    const movable = type === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost();
+    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: movable, lx: e.clientX, swing: 0 };
     bringToFront(el);
     el.setPointerCapture(e.pointerId);
   });
   el.addEventListener('pointermove', (e) => {
+    if (pen.stroke) return penMove(e);
     if (!start) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
@@ -1041,6 +1281,7 @@ function bindDraggable(el, type) {
     }
   });
   el.addEventListener('pointerup', async (e) => {
+    if (pen.stroke) return penUp();
     if (!start) return;
     const s = start;
     start = null;
@@ -1102,12 +1343,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   hidePopovers();
   if (S.placing) return stopPlacing();
+  if (pen.on) return setPen(false);
   if (!document.querySelector('dialog[open]') && S.openNote) closeThread();
 });
 
 function itemActions(type, item) {
   const acts = [];
-  if (!item.mine) acts.push({ icon: 'flag', label: 'Flag', action: () => openFlag(type, item.id) });
+  if (!item.mine) acts.push({ icon: 'flag', label: 'Report', action: () => openFlag(type, item.id) });
   if (item.mine && !S.archived) acts.push({ icon: 'trash', label: 'Delete', danger: true, action: () => deleteItem(type, item.id) });
   return acts;
 }
@@ -1148,7 +1390,7 @@ $('#flagForm').addEventListener('submit', async (e) => {
   try {
     await api('POST', '/api/flag', { ...flagTarget, reason });
     $('#flagDlg').close();
-    toast('Thank you. Flags from the community keep this place kind.', 4000);
+    toast('Thanks. A moderator will take a look.', 4000);
   } catch (err) {
     showError($('#flagDlg'), err);
   }
@@ -1201,10 +1443,10 @@ function replyEl(r) {
     const b = e.currentTarget.getBoundingClientRect();
     if (acts.length) showMenu(b.right - 180, b.bottom + 4, acts);
   };
-  const li = h('li', { class: `reply${r.mine ? ' mine' : ''}` },
+  const li = h('li', { class: `reply${r.mine ? ' mine' : ''}${r.pending ? ' pending' : ''}` },
     av,
     h('div', {},
-      h('div', { class: 'reply-meta' }, displayName(r), ...(r.mine ? [h('span', { class: 'you', text: 'you' })] : []), h('time', { text: timeAgo(r.createdAt) }), more),
+      h('div', { class: 'reply-meta' }, displayName(r), ...(r.mine ? [h('span', { class: 'you', text: 'you' })] : []), ...(r.pending ? [h('span', { class: 'wait-tag', text: 'Waiting for approval' })] : []), h('time', { text: timeAgo(r.createdAt) }), more),
       h('p', { class: 'reply-text', text: r.text }),
     ),
   );
@@ -1223,9 +1465,11 @@ function updateRepliesLabel() {
 
 function updateThreadLock() {
   const locked = $('.thread-locked');
-  $('#replyForm').hidden = !canPost();
-  locked.hidden = canPost();
-  locked.textContent = S.archived ? 'This day is archived. Replies are closed, but you can still read.' : S.me?.banned ? 'Paused identities can’t reply.' : '';
+  const waiting = !!S.notes.get(S.openNote)?.pending;
+  const open = canPost() && !waiting;
+  $('#replyForm').hidden = !open;
+  locked.hidden = open;
+  locked.textContent = waiting ? 'This note is waiting for a quick approval. Only you can see it for now, and replies open once it\u2019s approved.' : S.archived ? 'This day is archived. Replies are closed, but you can still read.' : S.me?.banned ? 'Paused identities can’t reply.' : '';
   showError($('#replyForm'), null);
 }
 
@@ -1260,8 +1504,9 @@ $('#replyForm').addEventListener('submit', async (e) => {
   btn.disabled = true;
   showError(form, null);
   try {
-    const { reply, support } = await api('POST', `/api/notes/${S.openNote}/replies`, { text: replyText.value });
+    const { reply, support, pending } = await api('POST', `/api/notes/${S.openNote}/replies`, { text: replyText.value });
     addReply(reply);
+    if (pending) toast(`Your reply will show for others once it\u2019s approved, because ${pending}.`, 5000);
     replyText.value = '';
     autoGrow(replyText);
     if (support) $('#supportDlg').showModal();
@@ -1336,8 +1581,9 @@ $('#composeForm').addEventListener('submit', async (e) => {
   showError(dlg, null);
   try {
     const text = $('#composeText').value;
-    await api('POST', '/api/notes/check', { text }); // kindness check before you carry it to a spot
+    const check = await api('POST', '/api/notes/check', { text }); // kindness check before you carry it to a spot
     dlg.close();
+    if (check.pending) toast(`This one will wait for a quick approval because ${check.pending}.`, 5000);
     startPlacing({ kind: 'note', text, color: S.composeColor, ...draft });
   } catch (err) {
     showError(dlg, err);
@@ -1351,7 +1597,7 @@ async function dropNote(st, cx, cy) {
   const size = noteSize(st.text);
   const p = toWorld(cx, cy);
   try {
-    const { note, support } = await api('POST', '/api/notes', {
+    const { note, support, pending } = await api('POST', '/api/notes', {
       text: st.text, color: st.color, paper: st.paper, fastener: st.fastener, x: p.x - NOTE_W[size] / 2, y: p.y - 30,
     });
     const el = upsertNote(note);
@@ -1360,7 +1606,8 @@ async function dropNote(st, cx, cy) {
     updateEmpty();
     $('#composeText').value = '';
     store.set('kb_draft', '');
-    toast(note.fastener === 'tape' ? 'Taped up. Someone will see it soon.' : note.fastener === 'pin' ? 'Pinned. Someone will see it soon.' : 'Placed. Someone will see it soon.');
+    if (pending) toast('Placed. Only you can see it until it\u2019s approved.', 5000);
+    else toast(note.fastener === 'tape' ? 'Taped up. Someone will see it soon.' : note.fastener === 'pin' ? 'Pinned. Someone will see it soon.' : 'Placed. Someone will see it soon.');
     if (support) $('#supportDlg').showModal();
   } catch (err) {
     $('#composeDlg').showModal();
@@ -1540,7 +1787,8 @@ function placeAt(cx, cy) {
 }
 async function postSticker(body, x, y) {
   try {
-    const { sticker } = await api('POST', '/api/stickers', { ...body, x, y, size: body.kind === 'doodle' ? 80 : 72 });
+    const { sticker, pending } = await api('POST', '/api/stickers', { ...body, x, y, size: body.kind === 'doodle' ? 80 : 72 });
+    if (pending) toast('Hand-made stickers wait for a quick approval. Only you can see it for now.', 5000);
     upsertSticker(sticker).classList.add('fresh');
     if (sticker.kind === 'word') S.chain = { id: sticker.id };
   } catch (err) {
@@ -1665,18 +1913,28 @@ function connectStream() {
   on('note', (n) => {
     if (n.day !== S.day) return;
     const fresh = !S.notes.has(n.id);
+    const wasPending = S.notes.get(n.id)?.pending;
     const el = upsertNote(n);
     if (fresh) el.classList.add('fresh');
+    if (wasPending && !n.pending && n.mine) toast('Your note was approved and is now on the board.', 5000);
+    if (S.openNote === n.id) updateThreadLock();
     updateEmpty();
   });
-  on('reply', (r) => addReply(r));
+  on('reply', (r) => {
+    const existing = $(`.reply[data-id="${CSS.escape(r.id)}"]`);
+    if (existing) existing.replaceWith(replyEl(r));
+    else addReply(r);
+  });
   on('sticker', (s) => {
     if (s.day !== S.day) return;
     const fresh = !S.stickers.has(s.id);
     const el = upsertSticker(s);
     if (fresh) el.classList.add('fresh');
   });
-  on('removed', ({ type, id }) => removeItem(type, id));
+  on('removed', ({ type, id, declined }) => {
+    removeItem(type, id);
+    if (declined) toast(`One of your ${type === 'reply' ? 'replies' : type === 'sticker' ? 'stickers' : 'notes'} wasn\u2019t approved, so it won\u2019t be posted.`, 6000);
+  });
   on('cursor', showCursor);
   on('presence', ({ online }) => { for (const el of $$('.presence-n')) el.textContent = online; });
   on('me', (me) => {
@@ -1722,6 +1980,7 @@ setInterval(() => {
     world.style.width = `${S.cfg.boardW}px`;
     world.style.height = `${S.cfg.boardH}px`;
     renderSwatches();
+    renderPenColors();
     const draft = store.get('kb_draft');
     if (draft) $('#composeText').value = draft;
     const [meRes, quoteRes] = await Promise.all([api('GET', '/api/me'), api('GET', '/api/quote').catch(() => null)]);

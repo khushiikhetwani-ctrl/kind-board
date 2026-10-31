@@ -27,7 +27,7 @@ const CONFIG = {
   timeZone: process.env.BOARD_TZ || 'UTC', // when "today" rolls over
   trustProxy: process.env.TRUST_PROXY === '1', // behind Render/Fly/Nginx etc.
   cookieSecure: process.env.COOKIE_SECURE === '1' ? true : process.env.COOKIE_SECURE === '0' ? false : null, // null = auto
-  flagsToHide: Number(process.env.FLAGS_TO_HIDE) || 3, // distinct people flagging → hidden + strike
+  flagsToHide: Number(process.env.FLAGS_TO_HIDE) || 3, // distinct reports → back to moderator review
   strikesToBan: 2,
   ipBanDays: 7,
   sessionDays: 30,
@@ -65,7 +65,7 @@ db.exec(`
     text TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, struck INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
-  -- kind: 'doodle' | 'emoji' | 'image' | 'word'
+  -- kind: 'doodle' | 'emoji' | 'image' | 'word' | 'line'
   CREATE TABLE IF NOT EXISTS stickers (
     id TEXT PRIMARY KEY, day TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id),
     kind TEXT NOT NULL, content TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, size REAL NOT NULL,
@@ -190,10 +190,10 @@ async function verifyPassphrase(pass, stored) {
 }
 function passphraseProblem(pass, handle) {
   const p = String(pass || '');
-  if (p.length < 10) return 'Use at least 10 characters. A short sentence works well.';
-  if (p.length > 200) return 'That passphrase is too long.';
-  if (COMMON_PASSPHRASES.has(p.toLowerCase()) || /^(.)\1+$/.test(p)) return 'That passphrase is too easy to guess.';
-  if (handle && p.toLowerCase().includes(handle.split('-')[0])) return 'Don’t include your animal name in your passphrase.';
+  if (p.length < 10) return 'Use at least 10 characters. A short phrase works well.';
+  if (p.length > 200) return 'That password is too long.';
+  if (COMMON_PASSPHRASES.has(p.toLowerCase()) || /^(.)\1+$/.test(p)) return 'That password is too easy to guess.';
+  if (handle && p.toLowerCase().includes(handle.split('-')[0])) return 'Don’t include your animal name in your password.';
   return null;
 }
 
@@ -249,10 +249,33 @@ function requireToday(day) {
 
 // ---------------------------------------------------------------- moderation
 
-function moderate(text) {
+// hidden = 3 means "waiting for approval": only its author can see it until a moderator approves.
+const PENDING = 3;
+const visibleTo = (alias = '') => `(${alias}hidden = 0 OR (${alias}hidden = ${PENDING} AND ${alias}user_id = ?))`;
+
+// Every post is checked automatically. Clearly harmful text is refused and counts as a
+// strike; unkind-but-fixable text is refused so it can be rephrased; text a filter can't
+// judge (links, contact details) is accepted but held for approval.
+function moderate(text, user) {
   const result = checkText(text);
-  if (!result.ok) throw new HttpError(422, result.reason, { moderation: true });
-  return result.support;
+  if (!result.ok) {
+    let message = result.reason;
+    if (result.severe && user) {
+      addStrike(user.id);
+      const u = q('SELECT strikes, banned FROM users WHERE id = ?').get(user.id);
+      message += u.banned
+        ? ' That was a second strike, so this identity is now paused. You can still read.'
+        : ` This counts as a strike (${u.strikes} of ${CONFIG.strikesToBan}).`;
+    }
+    throw new HttpError(422, message, { moderation: true, strike: !!result.severe });
+  }
+  return { support: result.support, hold: result.hold };
+}
+
+// Send an item to everyone, or only to its author while it waits for approval.
+function emit(event, item, row) {
+  if (row.hidden === PENDING) sendTo(row.user_id, event, forViewer(item, row.user_id));
+  else broadcast(event, item);
 }
 
 function addStrike(userId) {
@@ -304,14 +327,14 @@ const NOTE_SQL = `
 const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar FROM replies r JOIN users u ON u.id = r.user_id`;
 
 const noteOut = (r) => ({
-  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, x: r.x, y: r.y, rot: r.rot,
+  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
   name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
-  id: r.id, noteId: r.note_id, text: r.text, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, userId: r.user_id,
+  id: r.id, noteId: r.note_id, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, userId: r.user_id,
 });
 const stickerOut = (r) => ({
-  id: r.id, day: r.day, kind: r.kind, content: r.content, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,
+  id: r.id, day: r.day, kind: r.kind, content: r.content, pending: r.hidden === PENDING, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,
 });
 // Never expose internal user ids: replace them with a per-viewer "mine" flag.
 const forViewer = (item, viewerId) => {
@@ -413,7 +436,7 @@ function validPng(dataUrl, maxBytes = 150 * 1024) {
 }
 
 function ownedRow(type, id, user) {
-  const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden = 0`).get(id);
+  const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden IN (0, ${PENDING})`).get(id);
   if (!row) throw new HttpError(404, 'That is no longer on the board.');
   if (row.user_id !== user.id) throw new HttpError(403, 'You can only change your own things.');
   return row;
@@ -428,7 +451,7 @@ const route = (method, pattern, handler) => routes.push({ method, pattern, handl
 // Public: the landing page needs only these.
 route('GET', /^\/api\/config$/, () => ({
   today: today(), timeZone: CONFIG.timeZone, boardW: CONFIG.boardW, boardH: CONFIG.boardH,
-  noteColors: NOTE_COLORS, papers: PAPERS, fasteners: FASTENERS, strikesToBan: CONFIG.strikesToBan, flagsToHide: CONFIG.flagsToHide, animals: ANIMALS,
+  noteColors: NOTE_COLORS, lineColors: LINE_COLORS, papers: PAPERS, fasteners: FASTENERS, strikesToBan: CONFIG.strikesToBan, flagsToHide: CONFIG.flagsToHide, animals: ANIMALS,
 }));
 route('GET', /^\/api\/quote$/, () => {
   const day = today();
@@ -472,7 +495,7 @@ route('POST', /^\/api\/login$/, async ({ req, res }) => {
   const ok = await verifyPassphrase(body.passphrase, user?.pass_hash);
   if (!user || !ok) {
     hits(`login-fail:${handle}`, 900_000).push(now());
-    throw new HttpError(401, 'That handle and passphrase don’t match.');
+    throw new HttpError(401, 'That handle and password don’t match.');
   }
   startSession(req, res, user.id, !!body.remember);
   return { me: publicMe(user) };
@@ -499,8 +522,8 @@ route('GET', /^\/api\/board$/, ({ url, user }) => {
   const day = url.searchParams.get('day') || today();
   if (!isDay(day)) throw new HttpError(400, 'Invalid date.');
   if (day > today()) throw new HttpError(404, 'That day hasn’t happened yet.');
-  const notes = q(`${NOTE_SQL} WHERE n.day = ? AND n.hidden = 0 ORDER BY n.created_at`).all(day).map(noteOut);
-  const stickers = q('SELECT * FROM stickers WHERE day = ? AND hidden = 0 ORDER BY created_at').all(day).map(stickerOut);
+  const notes = q(`${NOTE_SQL} WHERE n.day = ? AND ${visibleTo('n.')} ORDER BY n.created_at`).all(day, user.id).map(noteOut);
+  const stickers = q(`SELECT * FROM stickers WHERE day = ? AND ${visibleTo()} ORDER BY created_at`).all(day, user.id).map(stickerOut);
   return {
     day, today: today(), archived: day !== today(), quote: quoteFor(day),
     notes: notes.map((n) => forViewer(n, user.id)),
@@ -539,25 +562,25 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
   const body = await readJson(req);
   const day = today();
   const text = cleanText(body.text);
-  const support = moderate(text);
+  const { support, hold } = moderate(text, user);
   rateLimit(`note:${user.id}`, 4, 60_000, 'You’ve pinned a few notes quickly. Take a breath and try again in a minute.');
   const color = NOTE_COLORS.includes(body.color) ? body.color : 'butter';
   const paper = PAPERS.includes(body.paper) ? body.paper : 'plain';
   const fastener = FASTENERS.includes(body.fastener) ? body.fastener : 'pin';
   const id = randomUUID();
-  q('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, x, y, rot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    id, day, user.id, text, color, paper, fastener, posX(body.x, 260), posY(body.y, 200), jitter(4), now(),
+  q('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    id, day, user.id, text, color, paper, fastener, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now(),
   );
   const note = getNote(id);
-  broadcast('note', note);
-  return { note: forViewer(note, user.id), support };
+  emit('note', note, { hidden: hold ? PENDING : 0, user_id: user.id });
+  return { note: forViewer(note, user.id), support, pending: hold };
 });
 
 route('POST', /^\/api\/notes\/check$/, async ({ req, user }) => {
   requirePoster(user);
   requireToday(today());
-  moderate(cleanText((await readJson(req)).text));
-  return { ok: true };
+  const { hold } = moderate(cleanText((await readJson(req)).text), user);
+  return { ok: true, pending: hold };
 });
 
 // Live cursors: where other people are on today's board. Ephemeral — never stored.
@@ -578,45 +601,67 @@ route('POST', /^\/api\/cursor$/, async ({ req, user }) => {
 
 route('PATCH', /^\/api\/notes\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
-  const row = ownedRow('note', params[0], user);
+  // Notes can be rearranged by anyone, like a shared corkboard. Waiting notes only by their writer.
+  const row = q(`SELECT * FROM notes WHERE id = ? AND ${visibleTo()}`).get(params[0], user.id);
+  if (!row) throw new HttpError(404, 'That is no longer on the board.');
+  rateLimit(`move:${user.id}`, 90, 60_000, 'Lots of rearranging! Give it a moment.');
   requireToday(row.day);
   const body = await readJson(req);
   q('UPDATE notes SET x = ?, y = ? WHERE id = ?').run(posX(body.x, 260), posY(body.y, 200), row.id);
   const note = getNote(row.id);
-  broadcast('note', note);
+  emit('note', note, row);
   return { note: forViewer(note, user.id) };
 });
 
 route('GET', /^\/api\/notes\/([\w-]+)$/, ({ user, params }) => {
   requireUser(user);
-  const r = q(`${NOTE_SQL} WHERE n.id = ? AND n.hidden = 0`).get(params[0]);
+  const r = q(`${NOTE_SQL} WHERE n.id = ? AND ${visibleTo('n.')}`).get(params[0], user.id);
   if (!r) throw new HttpError(404, 'This note is no longer on the board.');
-  const replies = q(`${REPLY_SQL} WHERE r.note_id = ? AND r.hidden = 0 ORDER BY r.created_at`).all(params[0]).map(replyOut);
+  const replies = q(`${REPLY_SQL} WHERE r.note_id = ? AND ${visibleTo('r.')} ORDER BY r.created_at`).all(params[0], user.id).map(replyOut);
   return { note: forViewer(noteOut(r), user.id), replies: replies.map((x) => forViewer(x, user.id)), archived: r.day !== today() };
 });
 
 route('POST', /^\/api\/notes\/([\w-]+)\/replies$/, async ({ req, user, params }) => {
   requirePoster(user);
-  const note = q('SELECT * FROM notes WHERE id = ? AND hidden = 0').get(params[0]);
-  if (!note) throw new HttpError(404, 'This note is no longer on the board.');
+  const note = q('SELECT * FROM notes WHERE id = ? AND hidden IN (0, ?)').get(params[0], PENDING);
+  if (!note || (note.hidden === PENDING && note.user_id !== user.id)) throw new HttpError(404, 'This note is no longer on the board.');
+  if (note.hidden === PENDING) throw new HttpError(403, 'Replies open once this note is approved.');
   requireToday(note.day);
   const text = cleanText((await readJson(req)).text);
-  const support = moderate(text);
+  const { support, hold } = moderate(text, user);
   rateLimit(`reply:${user.id}`, 10, 60_000);
   const id = randomUUID();
-  q('INSERT INTO replies (id, note_id, user_id, text, created_at) VALUES (?, ?, ?, ?, ?)').run(id, note.id, user.id, text, now());
+  q('INSERT INTO replies (id, note_id, user_id, text, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, note.id, user.id, text, hold ? PENDING : 0, now());
   const reply = replyOut(q(`${REPLY_SQL} WHERE r.id = ?`).get(id));
-  broadcast('reply', { ...reply, day: note.day });
-  broadcast('note', getNote(note.id)); // refresh reply count
-  return { reply: forViewer(reply, user.id), support };
+  emit('reply', { ...reply, day: note.day }, { hidden: hold ? PENDING : 0, user_id: user.id });
+  if (!hold) broadcast('note', getNote(note.id)); // refresh reply count
+  return { reply: forViewer(reply, user.id), support, pending: hold };
 });
+
+// A squiggly line: points relative to its top-left corner, plus colour and thickness.
+const LINE_COLORS = ['#161513', '#8f3f1c', '#c2410c', '#ca8a04', '#3f7d3a', '#0f766e', '#2b6cb0', '#6d65d8', '#be185d', '#ffffff'];
+function cleanLine(raw) {
+  const pts = Array.isArray(raw?.p) ? raw.p : [];
+  if (pts.length < 2 || pts.length > 600) throw new HttpError(400, 'That line is too short or too long.');
+  const p = pts.map((pt) => {
+    if (!Array.isArray(pt) || pt.length !== 2) throw new HttpError(400, 'Invalid line.');
+    return [Math.round(clamp(pt[0], 0, 3000)), Math.round(clamp(pt[1], 0, 3000))];
+  });
+  const c = LINE_COLORS.includes(raw.c) ? raw.c : LINE_COLORS[0];
+  const w = Math.round(clamp(raw.w, 2, 14));
+  return JSON.stringify({ p, c, w });
+}
 
 route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   requirePoster(user);
   const body = await readJson(req, 200 * 1024);
   let kind;
   let content;
-  if (body.kind === 'word') {
+  if (body.kind === 'line') {
+    rateLimit(`line:${user.id}`, 30, 60_000, 'Lots of drawing! Give it a moment.');
+    content = cleanLine(body.content);
+    kind = 'line';
+  } else if (body.kind === 'word') {
     rateLimit(`word:${user.id}`, 60, 60_000, 'Lots of words! Give it a moment.');
     const word = String(body.content || '').trim();
     if (!isBankWord(word)) {
@@ -643,13 +688,14 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
     }
   }
   const id = randomUUID();
-  const size = kind === 'word' ? 0 : clamp(body.size || 72, 40, 160);
-  q('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'word' ? jitter(2.5) : jitter(10), now(),
+  const size = kind === 'word' || kind === 'line' ? 0 : clamp(body.size || 72, 40, 160);
+  const hidden = kind === 'image' ? PENDING : 0;
+  q('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, now(),
   );
   const sticker = stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(id));
-  broadcast('sticker', sticker);
-  return { sticker: forViewer(sticker, user.id) };
+  emit('sticker', sticker, { hidden, user_id: user.id });
+  return { sticker: forViewer(sticker, user.id), pending: hidden === PENDING ? 'it\u2019s a hand-made sticker' : null };
 });
 
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
@@ -659,7 +705,7 @@ route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
   const body = await readJson(req);
   q('UPDATE stickers SET x = ?, y = ? WHERE id = ?').run(posX(body.x, 60), posY(body.y, 40), row.id);
   const sticker = stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(row.id));
-  broadcast('sticker', sticker);
+  emit('sticker', sticker, row);
   return { sticker: forViewer(sticker, user.id) };
 });
 
@@ -696,7 +742,8 @@ route('DELETE', /^\/api\/my-stickers\/([\w-]+)$/, ({ user, params }) => {
   return { ok: true };
 });
 
-// Flagging. Anyone logged in can flag (archived days included — moderation never stops).
+// Reports: a quiet backstop for anything the automatic checks miss. Reports never give
+// strikes; enough of them send the post back for a moderator to review.
 const FLAG_REASONS = ['hurtful', 'harassment', 'hate', 'self-harm', 'spam', 'inappropriate', 'other'];
 route('POST', /^\/api\/flag$/, async ({ req, user }) => {
   requireUser(user);
@@ -712,7 +759,10 @@ route('POST', /^\/api\/flag$/, async ({ req, user }) => {
   // Banned identities can still flag, but only active identities count toward auto-hiding.
   const { c } = q(`SELECT COUNT(*) AS c FROM flags f JOIN users u ON u.id = f.user_id
                    WHERE f.target_type = ? AND f.target_id = ? AND u.banned = 0`).get(type, id);
-  if (c >= CONFIG.flagsToHide) hideForModeration(type, id);
+  if (c >= CONFIG.flagsToHide) {
+    q(`UPDATE ${TABLES[type]} SET hidden = ? WHERE id = ?`).run(PENDING, id);
+    broadcastRemoval(type, id);
+  }
   return { ok: true };
 });
 
@@ -724,21 +774,32 @@ function requireAdmin(req) {
     throw new HttpError(401, 'Wrong moderator key.');
   }
 }
+function adminItem(type, id, flagInfo) {
+  const row = q(`SELECT t.*, u.handle, u.strikes, u.banned FROM ${TABLES[type]} t JOIN users u ON u.id = t.user_id WHERE t.id = ?`).get(id);
+  if (!row) return null;
+  return {
+    type, id, flags: flagInfo?.c || 0, reasons: flagInfo ? flagInfo.reasons.split(',') : [], when: flagInfo?.last || row.created_at,
+    text: row.text ?? null, kind: row.kind ?? null, content: row.content ?? null, day: dayOf(type, row), why: row.text ? checkText(row.text).hold : null,
+    hidden: row.hidden, pending: row.hidden === PENDING, struck: !!row.struck, author: row.handle, authorStrikes: row.strikes, authorBanned: !!row.banned,
+  };
+}
 route('GET', /^\/api\/admin\/flags$/, ({ req }) => {
   requireAdmin(req);
-  const groups = q(`SELECT target_type, target_id, COUNT(*) AS c, GROUP_CONCAT(DISTINCT reason) AS reasons, MAX(created_at) AS last
-                    FROM flags GROUP BY target_type, target_id ORDER BY last DESC LIMIT 200`).all();
-  return {
-    items: groups.map((g) => {
-      const row = q(`SELECT t.*, u.animal, u.handle, u.strikes, u.banned FROM ${TABLES[g.target_type]} t JOIN users u ON u.id = t.user_id WHERE t.id = ?`).get(g.target_id);
-      if (!row) return null;
-      return {
-        type: g.target_type, id: g.target_id, flags: g.c, reasons: g.reasons.split(','), lastFlag: g.last,
-        text: row.text ?? null, kind: row.kind ?? null, content: row.content ?? null, day: dayOf(g.target_type, row),
-        hidden: row.hidden, struck: !!row.struck, author: `${row.handle}`, authorStrikes: row.strikes, authorBanned: !!row.banned,
-      };
-    }).filter(Boolean),
-  };
+  const seen = new Set();
+  const items = [];
+  const flagged = new Map(q(`SELECT target_type, target_id, COUNT(*) AS c, GROUP_CONCAT(DISTINCT reason) AS reasons, MAX(created_at) AS last
+                             FROM flags GROUP BY target_type, target_id`).all().map((g) => [`${g.target_type}:${g.target_id}`, g]));
+  // Waiting for approval first, oldest first, so nobody waits too long.
+  for (const [type, table] of Object.entries(TABLES)) {
+    for (const r of q(`SELECT id FROM ${table} WHERE hidden = ? ORDER BY created_at LIMIT 200`).all(PENDING)) {
+      seen.add(`${type}:${r.id}`);
+      items.push(adminItem(type, r.id, flagged.get(`${type}:${r.id}`)));
+    }
+  }
+  for (const [key, g] of [...flagged].sort((x, y) => y[1].last - x[1].last).slice(0, 200)) {
+    if (!seen.has(key)) items.push(adminItem(g.target_type, g.target_id, g));
+  }
+  return { items: items.filter(Boolean) };
 });
 route('POST', /^\/api\/admin\/resolve$/, async ({ req }) => {
   requireAdmin(req);
@@ -746,14 +807,29 @@ route('POST', /^\/api\/admin\/resolve$/, async ({ req }) => {
   if (!TABLES[type]) throw new HttpError(400, 'Unknown item.');
   const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ?`).get(id);
   if (!row) throw new HttpError(404, 'Not found.');
-  if (action === 'remove') {
-    hideForModeration(type, id);
-  } else if (action === 'restore') {
+  const clearFlags = () => q('DELETE FROM flags WHERE target_type = ? AND target_id = ?').run(type, id);
+  if (action === 'approve' || action === 'restore') {
     q(`UPDATE ${TABLES[type]} SET hidden = 0, struck = 0 WHERE id = ?`).run(id);
-    q('DELETE FROM flags WHERE target_type = ? AND target_id = ?').run(type, id);
+    clearFlags();
     if (row.struck) removeStrike(row.user_id);
+    // Now everyone can see it.
+    if (type === 'note') broadcast('note', getNote(id));
+    if (type === 'sticker') broadcast('sticker', stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(id)));
+    if (type === 'reply') {
+      const note = q('SELECT day FROM notes WHERE id = ?').get(row.note_id);
+      broadcast('reply', { ...replyOut(q(`${REPLY_SQL} WHERE r.id = ?`).get(id)), day: note?.day });
+      broadcast('note', getNote(row.note_id));
+    }
+  } else if (action === 'decline') {
+    q(`UPDATE ${TABLES[type]} SET hidden = 1 WHERE id = ?`).run(id);
+    clearFlags();
+    sendTo(row.user_id, 'removed', { type, id, declined: true });
+    broadcastRemoval(type, id);
+  } else if (action === 'remove') {
+    hideForModeration(type, id);
+    clearFlags();
   } else if (action === 'dismiss') {
-    q('DELETE FROM flags WHERE target_type = ? AND target_id = ?').run(type, id);
+    clearFlags();
   } else {
     throw new HttpError(400, 'Unknown action.');
   }
