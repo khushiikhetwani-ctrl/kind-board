@@ -1,6 +1,7 @@
 // A small looping scene behind the intro: a gardener walks across a grassy field, sows
 // seeds, waters them, flowers bloom and a bush grows fruit, and the gardener gives a fruit
 // to a passer-by. Drawn on a canvas with the site's own palette; calm by design.
+// In "visit" mode (the calendar) the same gardener just strolls in, says hi, and walks on.
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -28,7 +29,8 @@ function shade(hex, amt) {
   return `rgb(${ch.join(',')})`;
 }
 
-export function startGarden(canvas) {
+export function startGarden(canvas, { mode = 'garden' } = {}) {
+  const visit = mode === 'visit';
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let W = 0;
@@ -42,7 +44,7 @@ export function startGarden(canvas) {
   let last = 0;
   let clock = 0; // ms of scene time
 
-  const groundY = (x) => H * 0.62 + Math.sin(x * 0.0042 + 0.6) * 9 + Math.sin(x * 0.011) * 3;
+  const groundY = (x) => H * (visit ? 0.7 : 0.62) + Math.sin(x * 0.0042 + 0.6) * (visit ? 5 : 9) + Math.sin(x * 0.011) * 3;
 
   // ---- the people
   const gardener = { x: -50, facing: 1, phase: 0, bend: 0, arm: 0, can: true, tilt: 0, holding: null, wave: 0 };
@@ -67,7 +69,23 @@ export function startGarden(canvas) {
     reset();
   }
 
+  function resetVisit() {
+    // a few flowers already in bloom, and a gardener passing by to say hi
+    plots = [0.12, 0.31, 0.7, 0.88].map((f, i) => ({
+      x: W * f + (Math.random() * 40 - 20), kind: i === 2 ? 'fruit' : 'flower', petal: colors.petals[i % colors.petals.length],
+      sown: true, seedAt: 0, wateredAt: -1e6, height: 26 + Math.random() * 14, fruits: 3,
+    }));
+    Object.assign(gardener, { x: -40, facing: 1, bend: 0, arm: 0, can: false, tilt: 0, holding: null, wave: 0 });
+    friend = null;
+    drops = [];
+    flying = null;
+    plan = [{ kind: 'walk', to: W * (0.42 + Math.random() * 0.16) }, { kind: 'hi', dur: 2800 }, { kind: 'walk', to: W + 50 }, { kind: 'rest', dur: 26000 + Math.random() * 14000 }];
+    step = 0;
+    stepStart = clock;
+  }
+
   function reset() {
+    if (visit) return resetVisit();
     const n = Math.max(3, Math.min(7, Math.floor(W / 190)));
     const span = W * 0.84;
     const start = W * 0.08;
@@ -101,7 +119,7 @@ export function startGarden(canvas) {
 
   function update(dt) {
     clock += dt;
-    fade = Math.min(1, fade + dt / 900);
+    fade = visit ? 1 : Math.min(1, fade + dt / 900);
     const s = plan[step];
     const t = clock - stepStart;
     const g = gardener;
@@ -138,6 +156,10 @@ export function startGarden(canvas) {
       if (t >= s.dur) { plots[s.plot].wateredAt = clock; nextStep(); }
     }
     if (s.kind === 'wait' && t >= s.dur) nextStep();
+    if (s.kind === 'hi') {
+      g.wave = 1;
+      if (t >= s.dur) nextStep();
+    }
     if (s.kind === 'pick') {
       const k = t / s.dur;
       g.arm = Math.sin(clamp01(k) * Math.PI) * 1.1;
@@ -255,6 +277,29 @@ export function startGarden(canvas) {
     }
     if (opts.holding === 'fruit') fruitDot(hand.x + p.facing * 2, hand.y - 4, 4.5);
     return hand;
+  }
+
+  function speech(p, text, alpha) {
+    if (alpha <= 0) return;
+    const x = p.x + 16;
+    const y = groundY(p.x) - 84;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = '600 13px Figtree, system-ui, sans-serif';
+    const w = ctx.measureText(text).width + 18;
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--raised').trim() || '#fff';
+    ctx.strokeStyle = colors.legs;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y - 13, w, 24, 12);
+    ctx.moveTo(x + 8, y + 11);
+    ctx.lineTo(x + 2, y + 17);
+    ctx.lineTo(x + 15, y + 11);
+    ctx.fill();
+    ctx.fillStyle = colors.legs;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 9, y);
+    ctx.restore();
   }
 
   function fruitDot(x, y, r) {
@@ -376,6 +421,7 @@ export function startGarden(canvas) {
       ctx.fill();
     }
     const g = gardener;
+    if (plan[step]?.kind === 'hi') speech(g, 'hi!', clamp01((clock - stepStart) / 300) * (1 - clamp01((clock - stepStart - plan[step].dur + 300) / 300)));
     const gHand = person(g, c.shirt, { bend: g.bend, arm: g.arm, can: g.can, tilt: g.tilt, holding: g.holding, wave: g.wave });
     if (friend && friend.x < W + 60) {
       const fHand = person(friend, c.friend, { holding: friend.holding, wave: friend.wave, arm: plan[step]?.kind === 'give' ? 0.55 : 0 });
@@ -402,7 +448,7 @@ export function startGarden(canvas) {
     clock = 0;
     gardener.x = W * 0.42;
     gardener.can = false;
-    friend = { x: W * 0.42 + 52, facing: -1, phase: 0, holding: 'fruit', wave: 0 };
+    friend = visit ? null : { x: W * 0.42 + 52, facing: -1, phase: 0, holding: 'fruit', wave: 0 };
     plan = [{ kind: 'rest', dur: Infinity }];
     step = 0;
     fade = 1;
@@ -418,6 +464,7 @@ export function startGarden(canvas) {
   if (reduce) staticScene();
 
   return {
+    restart() { if (!reduce) reset(); },
     play() {
       if (reduce || running) return;
       running = true;

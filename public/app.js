@@ -158,6 +158,13 @@ async function route() {
     stopHello();
     garden?.pause();
   }
+  if (view === 'calendar') {
+    if (!visitor) visitor = startGarden($('#visitor'), { mode: 'visit' });
+    else if (S.view !== 'calendar') visitor.restart();
+    visitor.play();
+  } else {
+    visitor?.pause();
+  }
   if (view === 'intro') showIntro();
   if (view === 'auth') showAuth();
   // Every wait is a small pause with a quote.
@@ -267,6 +274,7 @@ async function helloLoop(run) {
 }
 
 let garden = null;
+let visitor = null; // the same gardener, popping by on the calendar
 function showIntro() {
   garden ??= startGarden($('#garden'));
   garden.play();

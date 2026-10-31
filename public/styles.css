@@ -853,3 +853,8 @@ button { cursor: pointer; }
 .garden { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 44vh; pointer-events: none; z-index: 0; transition: opacity 0.8s var(--ease); }
 .intro > *:not(.garden) { position: relative; z-index: 1; }
 .intro[data-step="1"] .garden, .intro[data-step="2"] .garden { opacity: 0.35; }
+
+/* the gardener popping by on the calendar: a thin strip of grass along the bottom */
+.garden.visit { position: fixed; height: 130px; z-index: 0; }
+.cal-view .cal-layout { position: relative; z-index: 1; }
+.cal-layout { padding-bottom: 150px; }
