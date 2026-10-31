@@ -278,9 +278,21 @@ let visitor = null; // the same gardener, popping by on the calendar
 function showIntro() {
   if (!garden) {
     garden = startGarden($('#garden'), { look: S.me?.look });
-    garden.onSky(({ dark, caption }) => {
-      $('#intro').classList.toggle('sky-dark', dark);
+    garden.onSky(({ dark, caption, top, bottom }) => {
+      const intro = $('#intro');
+      intro.classList.toggle('sky-dark', dark);
       $('#skyCaption').textContent = caption;
+      // words take their colour from the sky: a deep tone of it by day, soft moonlight by night
+      const mix = (a, b, t) => {
+        const A = parseInt(a.slice(1), 16);
+        const B = parseInt(b.slice(1), 16);
+        return `#${[16, 8, 0].map((sh) => Math.round(((A >> sh) & 255) + (((B >> sh) & 255) - ((A >> sh) & 255)) * t).toString(16).padStart(2, '0')).join('')}`;
+      };
+      const ink = dark ? mix('#efe8dc', top, 0.12) : mix(top, '#2a2a3a', 0.72);
+      intro.style.setProperty('--sky-ink', ink);
+      intro.style.setProperty('--sky-ink-2', dark ? mix(ink, top, 0.25) : mix(ink, bottom, 0.28));
+      intro.style.setProperty('--sky-ink-3', dark ? mix(ink, top, 0.4) : mix(ink, bottom, 0.42));
+      intro.style.setProperty('--sky-glow', dark ? 'rgba(10, 14, 40, 0.35)' : `${top}40`);
     });
     garden.setEnv(currentEnv());
   }
