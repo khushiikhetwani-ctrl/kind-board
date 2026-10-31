@@ -1,0 +1,14 @@
+{
+  "name": "kindboard",
+  "version": "0.1.0",
+  "description": "An anonymous, kind, community sticky-note board. For people, by people.",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server.js",
+    "dev": "node --watch --no-warnings=ExperimentalWarning server.js",
+    "test": "node --no-warnings=ExperimentalWarning --test test/*.test.js"
+  },
+  "license": "MIT"
+}

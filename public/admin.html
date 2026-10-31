@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Kindboard Moderation</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin.css">
+  <script type="module" src="/admin.js"></script>
+</head>
+<body class="admin">
+  <div class="admin-wrap">
+    <header class="admin-head">
+      <h1 class="serif">Kindboard moderation</h1>
+      <form id="keyForm" class="keybox-row">
+        <input id="adminKey" type="password" placeholder="Moderator key" autocomplete="current-password">
+        <button class="btn sm primary">Unlock</button>
+      </form>
+    </header>
+    <p class="hint">Items with flags appear here. <b>Remove</b> hides it and gives the author a strike (2 strikes pauses them). <b>Restore</b> puts an auto-hidden item back and refunds the strike. <b>Dismiss</b> clears flags on a visible item.</p>
+    <p id="err" class="form-error" hidden></p>
+    <div id="list" class="admin-list"></div>
+  </div>
+</body>
+</html>

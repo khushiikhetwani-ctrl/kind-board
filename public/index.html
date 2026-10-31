@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kindboard</title>
+  <meta name="description" content="An anonymous board of kind words from strangers. Pin a thought and someone writes back. A new page every day.">
+  <meta property="og:title" content="Kindboard">
+  <meta property="og:description" content="An anonymous board of kind words from strangers. A new page every day.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#f1ede6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#151412" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <!-- line icons -->
+  <svg width="0" height="0" class="sprite" aria-hidden="true">
+    <defs>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M16 6l-4-4-4 4M12 2v13"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/></symbol>
+      <symbol id="i-sticker" viewBox="0 0 24 24"><path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9.5L21 14.5V5a2 2 0 0 0-2-2z"/><path d="M14 21v-5a2 2 0 0 1 2-2h5"/></symbol>
+      <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></symbol>
+      <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></symbol>
+      <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4L13 21M22 21H7M5 11l9 9"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM20 17v4H6.5A2.5 2.5 0 0 1 4 18.5"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+      <symbol id="i-return" viewBox="0 0 24 24"><path d="M9 10 4 15l5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- ============ 1. Intro: hello → what this is → kind rules ============ -->
+  <section id="intro" class="view intro" aria-label="Welcome">
+    <header class="intro-top">
+      <span class="wordmark"><span class="mark" aria-hidden="true"></span>kindboard</span>
+      <button class="ghost-link" id="skipIntro">Skip intro</button>
+    </header>
+
+    <div class="intro-step" data-step="hello">
+      <div class="hello-wrap" aria-live="polite"><span class="hello" id="helloText"></span><span class="caret" aria-hidden="true"></span></div>
+      <p class="hello-lang" id="helloLang"></p>
+      <p class="tap-hint">Click anywhere to continue</p>
+    </div>
+
+    <div class="intro-step" data-step="about">
+      <p class="eyebrow">What is this?</p>
+      <h1 class="intro-h">A notice board for strangers who&nbsp;want to talk.</h1>
+      <div class="about-cards">
+        <article class="about-card" data-color="butter"><span class="about-sticker" data-doodle="letter"></span><b>Write a note</b><span>Anything on your mind. No word limit. Nobody knows it's you.</span></article>
+        <article class="about-card" data-color="lilac"><span class="about-sticker" data-doodle="smile"></span><b>Someone writes back</b><span>Other people read it and reply, gently.</span></article>
+        <article class="about-card" data-color="lime"><span class="about-sticker" data-doodle="sun"></span><b>A new page every day</b><span>Each day gets a fresh board. Old days stay readable forever.</span></article>
+      </div>
+      <p class="why"><b>Why it exists:</b> sometimes you want to talk to someone and nobody is around. Here, somebody usually is.</p>
+      <p class="tap-hint">Click anywhere to continue</p>
+    </div>
+
+    <div class="intro-step" data-step="rules">
+      <p class="eyebrow">A few kind rules</p>
+      <h1 class="intro-h">Be the stranger you'd hope to meet.</h1>
+      <ol class="rule-list">
+        <li><span>1</span><div><b>Be kind.</b> No insults, put-downs or hate. Ever.</div></li>
+        <li><span>2</span><div><b>Never tell anyone to hurt themselves.</b> If someone is struggling, be gentle.</div></li>
+        <li><span>3</span><div><b>Stay anonymous.</b> Don't share names, numbers or addresses, yours or anyone's.</div></li>
+        <li><span>4</span><div><b>No spam or ads.</b> This is a place for people, not selling.</div></li>
+      </ol>
+      <div class="consequence">
+        <p class="eyebrow">If someone breaks them</p>
+        <div class="steps">
+          <div class="cstep"><svg class="i"><use href="#i-flag"/></svg><span>People flag the post</span></div>
+          <span class="cstep-arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></span>
+          <div class="cstep"><svg class="i"><use href="#i-trash"/></svg><span>It's removed and the writer gets a strike</span></div>
+          <span class="cstep-arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></span>
+          <div class="cstep"><svg class="i"><use href="#i-shield"/></svg><span>2 strikes and that identity is paused — it can read, but not post</span></div>
+        </div>
+        <p class="hint">Hurtful words are also stopped automatically, before they're ever posted.</p>
+      </div>
+      <button class="pill-cta" id="agreeBtn"><span>I agree — let me in</span><span class="pill-arrow"><svg class="i"><use href="#i-arrow"/></svg></span></button>
+    </div>
+
+    <div class="intro-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+  </section>
+
+  <!-- ============ waiting screen: a quote while things load ============ -->
+  <section id="loader" class="loader" aria-live="polite" hidden>
+    <div class="loader-notes" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p class="loader-label" id="loaderLabel">Opening…</p>
+    <figure class="loader-quote">
+      <blockquote id="loaderQuote"></blockquote>
+      <figcaption id="loaderBy"></figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 2. Log in / sign up ============ -->
+  <section id="auth" class="view auth" aria-label="Log in">
+    <div class="auth-panel">
+      <button class="ghost-link back" data-go="/"><svg class="i"><use href="#i-left"/></svg>Back</button>
+      <div class="auth-col">
+        <span class="mark lg" aria-hidden="true"></span>
+
+        <form id="signupForm" class="auth-form" autocomplete="on" novalidate>
+          <div class="auth-title"><h1>Join Kindboard</h1><p>No email, no real names. Just you, anonymously.</p></div>
+          <div class="animal-pick">
+            <span class="avatar" id="pickAvatar"></span>
+            <span class="animal-name" id="pickName"></span>
+            <button type="button" class="icon-btn" id="rerollAnimal" aria-label="Pick a different animal"><svg class="i"><use href="#i-shuffle"/></svg></button>
+          </div>
+          <div class="pass-field">
+            <input type="password" id="newPass" class="field" placeholder="Choose a passphrase" autocomplete="new-password" minlength="10" maxlength="200" required aria-describedby="passHint" aria-label="Choose a passphrase">
+            <button type="button" class="icon-btn reveal" aria-label="Show passphrase"><svg class="i"><use href="#i-eye"/></svg></button>
+          </div>
+          <div class="meter" aria-hidden="true"><i></i></div>
+          <p class="hint" id="passHint">10+ characters. A little sentence is easiest to remember.</p>
+          <label class="check"><input type="checkbox" id="rememberNew" checked><span>Keep me signed in on this device</span></label>
+          <label class="check"><input type="checkbox" id="agree"><span>I'll be kind. Hurtful posts get removed; 2 strikes pause an identity.</span></label>
+          <p class="form-error" hidden></p>
+          <button class="btn lav block" type="submit"><span class="btn-label">Create my identity</span><span class="spinner" aria-hidden="true"></span></button>
+          <p class="switch">Been here before? <button type="button" class="link-btn" data-mode="return">Log in</button></p>
+        </form>
+
+        <form id="loginForm" class="auth-form" autocomplete="on" hidden novalidate>
+          <div class="auth-title"><h1>Welcome back</h1><p>Log in with your handle and passphrase.</p></div>
+          <input id="loginHandle" class="field" autocomplete="username" placeholder="Handle, e.g. otter-2841" autocapitalize="none" spellcheck="false" required aria-label="Handle">
+          <div class="pass-field">
+            <input type="password" id="loginPass" class="field" placeholder="Passphrase" autocomplete="current-password" required aria-label="Passphrase">
+            <button type="button" class="icon-btn reveal" aria-label="Show passphrase"><svg class="i"><use href="#i-eye"/></svg></button>
+          </div>
+          <label class="check"><input type="checkbox" id="rememberLogin" checked><span>Keep me signed in on this device</span></label>
+          <p class="form-error" hidden></p>
+          <button class="btn lav block" type="submit"><span class="btn-label">Log in</span><span class="spinner" aria-hidden="true"></span></button>
+          <p class="switch">New here? <button type="button" class="link-btn" data-mode="new">Create an identity</button></p>
+          <p class="hint center">Passphrases can't be recovered — that's what keeps you anonymous.</p>
+        </form>
+
+        <p class="secure-note"><svg class="i"><use href="#i-lock"/></svg>Passphrases are hashed with scrypt. Sessions use HttpOnly, same-site cookies.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. Calendar ============ -->
+  <section id="calendar" class="view cal-view" aria-label="Calendar">
+    <header class="app-top">
+      <button class="wordmark link" data-go="/calendar"><span class="mark" aria-hidden="true"></span>kindboard</button>
+      <div class="top-actions">
+        <span class="presence hide-sm"><i></i><span class="presence-n">1</span>&nbsp;here now</span>
+        <button class="me-chip" data-me><span class="avatar"></span><span class="me-name hide-sm"></span></button>
+      </div>
+    </header>
+    <div class="cal-layout">
+      <aside class="cal-side">
+        <article class="today-card" id="todayCard">
+          <div class="tc-who"><span class="avatar lg" id="tcAvatar"></span><div><b id="greeting"></b><span id="todayLabel"></span></div></div>
+          <p class="tc-quote" id="todayQuote"></p>
+          <div class="tc-split">
+            <div><span class="tc-big" id="tcNotes">0</span><span class="tc-small" id="tcNotesLabel">notes pinned today</span></div>
+            <div><span class="tc-big" id="tcReplies">0</span><span class="tc-small" id="tcRepliesLabel">kind replies</span></div>
+          </div>
+          <button class="pill-cta light" id="openToday"><span>Open today's page</span><span class="pill-arrow"><svg class="i"><use href="#i-arrow"/></svg></span></button>
+        </article>
+        <p class="hint">Finished days are archived — you can visit any of them and read every note, but nothing changes.</p>
+      </aside>
+      <div class="cal-main">
+        <div class="cal-nav">
+          <div class="cal-month">
+            <button class="icon-btn" id="calPrev" aria-label="Previous month"><svg class="i"><use href="#i-left"/></svg></button>
+            <h1 id="calTitle"></h1>
+            <button class="icon-btn" id="calNext" aria-label="Next month"><svg class="i"><use href="#i-right"/></svg></button>
+          </div>
+          <div class="seg-toggle" role="tablist" aria-label="Calendar style">
+            <button role="tab" class="active" data-cal="map" aria-selected="true">Map</button>
+            <button role="tab" data-cal="grid" aria-selected="false">Grid</button>
+          </div>
+        </div>
+        <div class="cal-map" id="calMap">
+          <svg class="map-path" id="mapPath" aria-hidden="true"><path class="trail done"/><path class="trail todo"/></svg>
+          <div class="map-nodes" id="mapNodes"></div>
+        </div>
+        <div class="cal-grid" id="calGrid" hidden></div>
+        <div class="map-legend"><span><i class="lg-dot done"></i>visited day</span><span><i class="lg-dot today"></i>today</span><span><i class="lg-dot todo"></i>still to come</span></div>
+        <div class="cal-peek" id="calPeek" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. Board ============ -->
+  <section id="board" class="view board-view" aria-label="Board">
+    <main id="viewport" aria-label="Sticky note board"><div id="world"><div id="cursors" aria-hidden="true"></div></div></main>
+
+    <div id="empty" class="empty" hidden>
+      <p class="serif empty-title"></p>
+      <p class="muted empty-sub"></p>
+    </div>
+
+    <header class="board-top">
+      <button class="chip-btn" data-go="/calendar"><svg class="i"><use href="#i-calendar"/></svg><span class="hide-sm">Calendar</span></button>
+      <div class="day-title">
+        <button class="icon-btn" id="prevDay" aria-label="Previous day"><svg class="i"><use href="#i-left"/></svg></button>
+        <div class="day-text"><span class="serif" id="dayText"></span><span class="badge" id="archivedBadge" hidden>Archived</span></div>
+        <button class="icon-btn" id="nextDay" aria-label="Next day"><svg class="i"><use href="#i-right"/></svg></button>
+      </div>
+      <div class="top-actions">
+        <span class="presence hide-sm"><i></i><span class="presence-n">1</span>&nbsp;here</span>
+        <button class="chip-btn hide-xs" id="shareBtn" aria-label="Share this board"><svg class="i"><use href="#i-share"/></svg><span class="hide-sm">Share</span></button>
+        <button class="me-chip" data-me><span class="avatar"></span><span class="me-name hide-sm"></span></button>
+      </div>
+    </header>
+
+    <div class="banners">
+      <div id="archiveBanner" class="banner" hidden>
+        <svg class="i"><use href="#i-book"/></svg>
+        <span>You're reading an archived day. Everything stays, but nothing can be changed.</span>
+        <button class="link-btn" data-go="today">Go to today</button>
+      </div>
+      <div id="bannedBanner" class="banner danger" hidden>
+        <svg class="i"><use href="#i-shield"/></svg>
+        <span>This identity was paused after 2 strikes. You can still read.</span>
+        <button class="link-btn" data-open="guidelinesDlg">Why?</button>
+      </div>
+    </div>
+
+    <nav class="dock" aria-label="Board tools">
+      <button id="newNoteBtn" class="btn primary"><svg class="i"><use href="#i-plus"/></svg>Write a note</button>
+      <button class="btn subtle" data-tray="words" aria-controls="tray"><svg class="i"><use href="#i-type"/></svg><span class="hide-xs">Words</span></button>
+      <button class="btn subtle" data-tray="stickers" aria-controls="tray"><svg class="i"><use href="#i-sticker"/></svg><span class="hide-xs">Stickers</span></button>
+      <span class="dock-sep hide-sm"></span>
+      <button id="zoomOut" class="icon-btn hide-sm" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+      <button id="surfaceBtn" class="icon-btn" aria-label="Change the board surface" title="Board surface"><svg class="i"><use href="#i-layers"/></svg></button>
+      <button id="zoomReset" class="icon-btn" aria-label="Fit to screen"><svg class="i"><use href="#i-fit"/></svg></button>
+      <button id="zoomIn" class="icon-btn hide-sm" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
+    </nav>
+
+    <section id="tray" class="tray" hidden aria-label="Decorate">
+      <div class="tray-head">
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab" data-tab="words">Word play</button>
+          <button role="tab" class="tab" data-tab="stickers">Stickers</button>
+          <button role="tab" class="tab" data-tab="mine">Made by me</button>
+        </div>
+        <button class="icon-btn" id="trayClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+      </div>
+
+      <div data-panel="words">
+        <p class="tray-hint">Tap a word, then tap the board. Keep tapping words to continue your sentence.</p>
+        <div class="word-bank" id="wordBank"></div>
+        <div class="word-bank glue" id="glueBank"></div>
+        <div class="tray-row">
+          <form id="customWord" class="custom-word">
+            <input id="customWordInput" class="field sm" maxlength="18" placeholder="Your own word" autocomplete="off" aria-label="Add your own word">
+            <button class="btn sm subtle" type="submit">Add</button>
+          </form>
+          <button class="btn sm subtle" id="shuffleWords"><svg class="i"><use href="#i-shuffle"/></svg>Jumble</button>
+          <button class="btn sm subtle" id="newLine"><svg class="i"><use href="#i-return"/></svg>New line</button>
+        </div>
+      </div>
+      <div data-panel="stickers" hidden>
+        <p class="tray-hint">Pick one, then tap the board to stick it down.</p>
+        <div class="sticker-grid" id="doodleGrid"></div>
+      </div>
+      <div data-panel="mine" hidden>
+        <p class="tray-hint">Draw your own, or turn a photo into a sticker. Only you can use these.</p>
+        <div class="sticker-grid" id="mineGrid"></div>
+      </div>
+    </section>
+
+    <aside id="thread" class="thread" hidden aria-label="Conversation">
+      <div class="thread-head">
+        <span class="label">Conversation</span>
+        <div class="thread-actions">
+          <button class="icon-btn" id="threadShare" aria-label="Copy link to this note"><svg class="i"><use href="#i-link"/></svg></button>
+          <button class="icon-btn" id="threadMenu" aria-label="More options"><svg class="i"><use href="#i-more"/></svg></button>
+          <button class="icon-btn" id="threadClose" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <div class="thread-body">
+        <article class="thread-note"></article>
+        <div class="replies-label label"></div>
+        <ol class="reply-list"></ol>
+      </div>
+      <form class="reply-form" id="replyForm">
+        <textarea id="replyText" rows="2" placeholder="Write back with kindness…" aria-label="Your reply"></textarea>
+        <p class="form-error" hidden></p>
+        <div class="reply-row">
+          <span class="reply-as hint"></span>
+          <button class="btn primary sm" type="submit">Reply</button>
+        </div>
+      </form>
+      <p class="thread-locked" hidden></p>
+    </aside>
+  </section>
+
+  <!-- ============ dialogs ============ -->
+
+  <dialog id="savedDlg" class="dlg">
+    <form method="dialog">
+      <div class="avatar xl" id="savedAvatar"></div>
+      <h2 class="serif">Welcome, <span id="savedName"></span>.</h2>
+      <p class="muted">This is your handle. You'll need it, with your passphrase, to log in on another device. Write it down somewhere safe.</p>
+      <div class="handle-box"><code id="savedHandle"></code><button type="button" class="btn sm subtle" data-copy-handle><svg class="i"><use href="#i-copy"/></svg>Copy</button></div>
+      <div class="dlg-actions"><button class="btn primary" value="ok">Continue to the calendar<svg class="i"><use href="#i-arrow"/></svg></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="composeDlg" class="dlg wide">
+    <form id="composeForm">
+      <div class="dlg-head"><h2 class="serif">A new note</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+      <div class="compose-note" data-color="butter">
+        <div class="compose-as"></div>
+        <textarea id="composeText" placeholder="What's on your mind? A worry, a small win, a question for a stranger…" aria-label="Your note"></textarea>
+      </div>
+      <div class="compose-foot">
+        <div class="swatches" role="radiogroup" aria-label="Paper color"></div>
+        <span class="hint" id="composeCount">No word limit.</span>
+      </div>
+      <div class="compose-opts">
+        <div class="opt-group" role="radiogroup" aria-label="Paper">
+          <span class="label">Paper</span>
+          <button type="button" class="opt" data-paper="plain" aria-checked="true" role="radio"><i class="pv plain"></i>Plain</button>
+          <button type="button" class="opt" data-paper="lined" aria-checked="false" role="radio"><i class="pv lined"></i>Lined</button>
+          <button type="button" class="opt" data-paper="grid" aria-checked="false" role="radio"><i class="pv grid"></i>Grid</button>
+        </div>
+        <div class="opt-group" role="radiogroup" aria-label="Hold it up with">
+          <span class="label">Hold with</span>
+          <button type="button" class="opt" data-fastener="pin" aria-checked="true" role="radio"><i class="fv pin"></i>Pin</button>
+          <button type="button" class="opt" data-fastener="tape" aria-checked="false" role="radio"><i class="fv tape"></i>Tape</button>
+          <button type="button" class="opt" data-fastener="none" aria-checked="false" role="radio"><i class="fv none"></i>Nothing</button>
+        </div>
+      </div>
+      <p class="form-error" hidden></p>
+      <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button class="btn primary" type="submit">Choose a spot<svg class="i"><use href="#i-arrow"/></svg></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="guidelinesDlg" class="dlg">
+    <div class="dlg-head"><h2 class="serif">Keeping it kind</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <ol class="rules">
+      <li><b>Lead with kindness.</b> Many people come here because they're lonely or having a hard day.</li>
+      <li><b>No hate, harassment or put-downs.</b> Slurs, threats and belittling words are blocked automatically.</li>
+      <li><b>Never tell someone to hurt themselves.</b> Ever.</li>
+      <li><b>Flag what feels wrong.</b> When several people flag a post, it's removed and its author gets a strike.</li>
+      <li><b>Two strikes pause an identity.</b> It can still read, but can't post, reply or decorate.</li>
+      <li><b>Stay anonymous.</b> Don't share personal details, yours or anyone else's.</li>
+    </ol>
+    <p class="support-line">If you're struggling right now, you deserve real support. In the US call or text <b>988</b>. In the UK &amp; Ireland call Samaritans on <b>116 123</b>. Elsewhere, <b>findahelpline.com</b> lists free, confidential lines.</p>
+  </dialog>
+
+  <dialog id="flagDlg" class="dlg">
+    <form id="flagForm">
+      <div class="dlg-head"><h2 class="serif">Flag this</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+      <p class="muted">Thank you for looking out for others. What's wrong with it?</p>
+      <div class="reasons">
+        <label><input type="radio" name="reason" value="hurtful" checked><span>Hurtful or belittling</span></label>
+        <label><input type="radio" name="reason" value="harassment"><span>Harassment or bullying</span></label>
+        <label><input type="radio" name="reason" value="hate"><span>Hate or slurs</span></label>
+        <label><input type="radio" name="reason" value="self-harm"><span>Encourages self-harm</span></label>
+        <label><input type="radio" name="reason" value="inappropriate"><span>Sexual or inappropriate</span></label>
+        <label><input type="radio" name="reason" value="spam"><span>Spam or ads</span></label>
+        <label><input type="radio" name="reason" value="other"><span>Something else</span></label>
+      </div>
+      <p class="form-error" hidden></p>
+      <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button class="btn danger" type="submit">Flag</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="drawDlg" class="dlg">
+    <div class="dlg-head"><h2 class="serif">Make a sticker</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="draw-wrap"><canvas id="drawCanvas" width="320" height="320" aria-label="Drawing area"></canvas></div>
+    <div class="draw-colors" role="radiogroup" aria-label="Brush color"></div>
+    <div class="draw-row">
+      <label class="size-label">Brush<input id="brushSize" type="range" min="2" max="40" value="10"></label>
+      <button type="button" class="icon-btn" id="eraserBtn" aria-pressed="false" aria-label="Eraser"><svg class="i"><use href="#i-eraser"/></svg></button>
+      <label class="icon-btn file-btn" aria-label="Add a photo"><svg class="i"><use href="#i-image"/></svg><input type="file" id="uploadInput" accept="image/*" hidden></label>
+      <button type="button" class="icon-btn" id="clearBtn" aria-label="Clear"><svg class="i"><use href="#i-trash"/></svg></button>
+    </div>
+    <p class="form-error" hidden></p>
+    <div class="dlg-actions"><button type="button" class="btn subtle" data-close>Cancel</button><button type="button" class="btn primary" id="saveSticker">Save sticker</button></div>
+  </dialog>
+
+  <dialog id="supportDlg" class="dlg">
+    <form method="dialog">
+      <h2 class="serif">You're not alone.</h2>
+      <p class="muted">It sounds like you might be carrying something heavy. Your words are on the board, and you also deserve to talk to someone right now.</p>
+      <ul class="rules plain">
+        <li><b>US</b> · call or text <b>988</b>, the Suicide &amp; Crisis Lifeline</li>
+        <li><b>UK &amp; Ireland</b> · Samaritans, <b>116 123</b></li>
+        <li><b>Anywhere</b> · <b>findahelpline.com</b> lists free, confidential lines</li>
+        <li>If you're in immediate danger, call your local emergency number.</li>
+      </ul>
+      <div class="dlg-actions"><button class="btn primary" value="ok">Thank you</button></div>
+    </form>
+  </dialog>
+
+  <div id="meMenu" class="popover me-menu" hidden>
+    <div class="me-card">
+      <span class="avatar lg"></span>
+      <div><div class="me-big-name"></div><div class="me-handle"></div></div>
+    </div>
+    <div class="strikes"></div>
+    <div class="menu-list">
+      <button data-open="guidelinesDlg"><svg class="i"><use href="#i-book"/></svg>Community guidelines</button>
+      <button id="logoutBtn"><svg class="i"><use href="#i-logout"/></svg>Log out</button>
+      <button id="logoutAllBtn" class="danger"><svg class="i"><use href="#i-shield"/></svg>Log out on all devices</button>
+    </div>
+  </div>
+  <div id="menu" class="popover menu-list" hidden role="menu"></div>
+  <div id="ghost" class="ghost" hidden aria-hidden="true"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

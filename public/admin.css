@@ -1,0 +1,15 @@
+body.admin { overflow: auto; }
+.admin-wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
+.admin-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-head h1 { font-size: 32px; margin: 0; }
+.admin-head input { border: 1.5px solid var(--line); background: var(--surface); border-radius: 12px; padding: 8px 12px; }
+.admin-list { display: grid; gap: 12px; margin-top: 16px; }
+.mod-item { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; }
+.mod-item.is-hidden { opacity: 0.75; border-style: dashed; }
+.mod-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 700; color: var(--ink-soft); }
+.mod-meta .tag { background: var(--surface-2); border: 1px solid var(--line); padding: 2px 8px; border-radius: 99px; }
+.mod-meta .tag.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.mod-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; max-height: 240px; overflow: auto; }
+.mod-img { width: 96px; height: 96px; object-fit: contain; background: var(--surface-2); border-radius: 12px; }
+.mod-emoji { font-size: 48px; }
+.mod-actions { display: flex; gap: 8px; }
