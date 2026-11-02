@@ -1105,4 +1105,4 @@ body.pat-cursor, body.pat-cursor * {
 
 /* smooth dragging: the piece in hand gets its own layer, and the board holds still meanwhile */
 .note.dragging, .sticker.dragging { animation: none; will-change: translate, rotate; }
-.board-view.moving .note, #viewport.panning .note { animation-play-state: paused; }
+.board-view.moving .note, #viewport.panning .note, #viewport.scrolling .note { animation-play-state: paused; }

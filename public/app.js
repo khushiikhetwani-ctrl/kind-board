@@ -1314,12 +1314,24 @@ function removeItem(type, id) {
 
 // ---------------------------------------------------------------- camera: pan, zoom, momentum
 
+// Trackpads send a stream of tiny scroll/pinch events (often faster than the screen refreshes),
+// so the camera is written to the page at most once per frame, and the zoom-only bits
+// (which make the browser restyle every note) only when the zoom actually changed.
+let camFrame = 0;
+let shownZ = null;
 function applyCam() {
-  const { x, y, z } = S.cam;
-  world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${z})`;
-  world.style.setProperty('--inv', 1 / z); // keeps cursor name tags the same size at any zoom
-  $('#zoomReset').textContent = `${Math.round(z * 100)}%`;
-  scheduleMinimap();
+  if (camFrame) return;
+  camFrame = requestAnimationFrame(() => {
+    camFrame = 0;
+    const { x, y, z } = S.cam;
+    world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${z})`;
+    if (z !== shownZ) {
+      shownZ = z;
+      world.style.setProperty('--inv', 1 / z); // keeps cursor name tags the same size at any zoom
+      $('#zoomReset').textContent = `${Math.round(z * 100)}%`;
+    }
+    scheduleMinimap();
+  });
 }
 
 // ---------------------------------------------------------------- minimap
@@ -1609,13 +1621,20 @@ function glide(vx, vy) {
 }
 viewport.addEventListener('pointerup', endPointer);
 viewport.addEventListener('pointercancel', endPointer);
+let wheelIdle = 0;
 viewport.addEventListener('wheel', (e) => {
   e.preventDefault();
   cancelAnimationFrame(camAnim);
-  if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01));
+  // hold the notes' gentle float still while scrolling or pinching, so only the camera moves
+  viewport.classList.add('scrolling');
+  clearTimeout(wheelIdle);
+  wheelIdle = setTimeout(() => viewport.classList.remove('scrolling'), 180);
+  // a mouse wheel may report lines or pages instead of pixels
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1;
+  if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * unit * 0.01)); // trackpad pinch
   else {
-    S.cam.x -= e.deltaX;
-    S.cam.y -= e.deltaY;
+    S.cam.x -= e.deltaX * unit;
+    S.cam.y -= e.deltaY * unit;
     applyCam();
   }
 }, { passive: false });
@@ -1672,7 +1691,7 @@ function bindDraggable(el, type) {
     if (!s) return;
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
-    const threshold = s.mine ? 4 : 8; // a little more deliberate for someone else's note
+    const threshold = s.mine ? 5 : 8; // trackpad clicks wobble a few pixels; above that it's a drag
     if (!s.drag && s.can && Math.hypot(dx, dy) > threshold) {
       s.drag = true;
       s.el.classList.add('dragging');
