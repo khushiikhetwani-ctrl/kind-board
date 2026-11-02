@@ -1667,7 +1667,8 @@ $('#zoomReset').onclick = () => fitView();
 function bindDraggable(el, type) {
   let start = null;
   const itemOf = (t, id) => (t === 'note' ? S.notes : S.stickers).get(id);
-  const mayMove = (t, item) => !!item && (t === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost());
+  // notes and word tiles are shared (anyone can rearrange them); other pieces move only for their owner
+  const mayMove = (t, item) => !!item && canPost() && (t === 'note' || item.kind === 'word' ? !item.pending || item.mine : item.mine);
   const canMove = (t, item) => mayMove(t, item) && !item.pinned;
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
@@ -1714,7 +1715,7 @@ function bindDraggable(el, type) {
       s.el.classList.remove('nope');
       void s.el.offsetWidth;
       s.el.classList.add('nope'); // a little wiggle: it's pinned
-      toast(s.mine ? 'Pinned in place. Unpin it (right-click or tap) to move it.' : 'Its writer pinned this one in place.');
+      toast(s.mine ? 'Pinned in place. Unpin it (right-click or tap) to move it.' : 'Whoever placed this pinned it in place.');
     }
     if (!s.drag && s.can && Math.hypot(dx, dy) > threshold) {
       s.drag = true;

@@ -1074,9 +1074,13 @@ route('PATCH', /^\/api\/(note|sticker)s\/([\w-]+)\/settings$/, async ({ req, use
 
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
-  const row = (await ownedRow('sticker', params[0], user));
+  // Word tiles are shared, like fridge magnets: anyone can rearrange today's words.
+  // Other stickers and drawings move only for whoever placed them.
+  const shared = (await dbGet(`SELECT * FROM stickers WHERE id = ? AND kind = 'word' AND ${visibleTo()}`, params[0], user.id));
+  const row = shared || (await ownedRow('sticker', params[0], user));
   requireToday(row.day);
-  if (row.pinned) throw new HttpError(409, 'This is pinned in place. Unpin it to move it.', { pinned: true });
+  if (row.user_id !== user.id) rateLimit(`move:${user.id}`, 90, 60_000, 'Lots of rearranging! Give it a moment.');
+  if (row.pinned) throw new HttpError(409, row.user_id === user.id ? 'This is pinned in place. Unpin it to move it.' : 'Whoever placed this pinned it in place.', { pinned: true });
   const body = await readJson(req);
   await guardClear(user, row.day, stickerBox(row.kind, row.content, posX(body.x, 60), posY(body.y, 40), row.size), { skip: row.id });
   (await dbRun('UPDATE stickers SET x = ?, y = ? WHERE id = ?', posX(body.x, 60), posY(body.y, 40), row.id));
