@@ -1098,3 +1098,7 @@ body.pat-cursor, body.pat-cursor * {
 #menu .emoji-picker .emoji-tab { width: 34px; }
 #menu .emoji-picker .emoji-own .btn { padding: 0 12px; }
 #menu .emoji-picker .react-pick .react-opt { width: 42px; }
+
+/* "please use Google" after a paused identity: a gentle pulse around the button */
+.btn.google.nudge { animation: nudge 1.4s var(--spring) 2; }
+@keyframes nudge { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px color-mix(in srgb, #4285f4 35%, transparent); } }

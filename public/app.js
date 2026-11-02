@@ -467,8 +467,20 @@ $('#signupForm').addEventListener('submit', (e) => {
   if ($('#newPass').value.length < 10) return showError(form, 'Use at least 10 characters. A few words work well.');
   if (!$('#agree').checked) return showError(form, 'Please tick \u201cI\u2019ll be kind\u201d to continue.');
   submitWith(form, async () => {
-    const { me } = await api('POST', '/api/signup', { animal: S.signupAnimal, passphrase: $('#newPass').value, remember: $('#rememberNew').checked });
-    await afterLogin(me, { fresh: true });
+    try {
+      const { me } = await api('POST', '/api/signup', { animal: S.signupAnimal, passphrase: $('#newPass').value, remember: $('#rememberNew').checked });
+      await afterLogin(me, { fresh: true });
+    } catch (err) {
+      if (err.data?.needGoogle) {
+        // new identities from here have to come through Google: point at the button
+        const g = $('[data-google]', form);
+        g.classList.remove('nudge');
+        void g.offsetWidth;
+        g.classList.add('nudge');
+        g.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      throw err;
+    }
   });
 });
 $('#loginForm').addEventListener('submit', (e) => {

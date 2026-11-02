@@ -27,7 +27,7 @@ Every day has its own board. When the day ends, the board is **archived**: anyon
 | Brute force | Per-IP rate limits, plus a **15-minute lockout per handle** after 8 failed attempts. Unknown handles get the same generic error and take the same time. |
 | CSRF / XSS | A custom request header and Origin check, a strict Content-Security-Policy, and user content rendered only as text. |
 | Kindness filter | Slurs, threats, "kys" and belittling insults are blocked before posting, even with leetspeak or s.p.a.c.i.n.g. Venting about yourself is allowed. |
-| Automatic moderation | Clearly harmful posts are refused and count as a **strike** automatically. **2 strikes → paused**: their posts are removed, and new sign-ups from that network pause for 7 days. Put-downs are refused with a prompt to rephrase (no strike). |
+| Automatic moderation | Clearly harmful posts are refused and count as a **strike** automatically. **2 strikes → paused**: their posts are removed, and for 30 days any new identity from their network or browser must come through **Continue with Google** (one Google account = one identity, so a paused person can't just start over; a paused Google account signs back in to its paused identity). Without Google set up, new sign-ups from that network pause instead. Put-downs are refused with a prompt to rephrase (no strike). |
 | Waiting for approval | Links, contact details, "DM me on…" and hand-made stickers go up as **waiting for approval**. Only the writer sees them until a moderator approves them on `/admin`. |
 | Reports | A quiet "Report" in each ⋯ menu. Reports never give strikes; 3 of them send a post back for a moderator to review. |
 | Local weather (optional) | The intro sky follows each visitor's own clock. Real weather is opt-in: the browser asks for location, it's rounded to about 10 km, kept only in that browser, and sent only to Open-Meteo (free, no key). Our server never sees it. |
@@ -119,7 +119,7 @@ Free-plan notes: the site sleeps after ~15 idle minutes and takes ~30–60 s to 
 ## Known limits
 
 - The word filter is a strong first line, not a perfect one. Extend `moderation.js`, or add an AI moderation service for nuance. Drawn stickers rely on flags.
-- The network pause can catch others on shared Wi-Fi, so it expires after 7 days.
+- The network rule can catch others on shared Wi-Fi (a campus, a café). They can still join with Google, and the rule expires after 30 days.
 - Rate limits live in memory, so run a single instance.
 
 ## Files

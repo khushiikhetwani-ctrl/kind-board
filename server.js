@@ -40,7 +40,7 @@ const CONFIG = {
   accountSalt: process.env.ACCOUNT_SALT || process.env.IP_SALT || 'change-me-in-production', // never change once people sign in
   flagsToHide: Number(process.env.FLAGS_TO_HIDE) || 3, // distinct reports → back to moderator review
   strikesToBan: 2,
-  ipBanDays: 7,
+  ipBanDays: 30, // after a pause, new identities from that network or device must use Google
   sessionDays: 30,
   maxText: 20000, // "no word limit" in practice — this only stops abuse
   boardW: 4000,
@@ -121,6 +121,7 @@ async function setupDatabase() {
   if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
   if (!userCols.has('variant')) await dbRun('ALTER TABLE users ADD COLUMN variant INTEGER'); // which version of their animal (colour + accessory)
   if (!userCols.has('avatar_mode')) await dbRun("ALTER TABLE users ADD COLUMN avatar_mode TEXT NOT NULL DEFAULT 'animal'"); // 'animal' or 'custom'
+  if (!userCols.has('last_ip')) await dbRun('ALTER TABLE users ADD COLUMN last_ip TEXT'); // network of their latest sign-in (hashed)
   if (!userCols.has('google_hash')) await dbRun('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
   const replyCols = new Set((await dbAll('PRAGMA table_info(replies)')).map((c) => c.name));
   if (!replyCols.has('parent_id')) await dbRun('ALTER TABLE replies ADD COLUMN parent_id TEXT'); // reply to a reply
@@ -262,6 +263,7 @@ async function startSession(req, res, userId, remember) {
   const token = randomBytes(32).toString('base64url');
   const ttl = remember ? CONFIG.sessionDays * 86_400_000 : 86_400_000; // non-remembered: 1 day max
   (await dbRun('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', sha(token), userId, now(), now() + ttl));
+  (await dbRun('UPDATE users SET last_ip = ? WHERE id = ?', ipHash(req), userId));
   setSessionCookie(req, res, token, remember);
 }
 // Logins are remembered for a few seconds, so busy moments (live cursors, many people at once)
@@ -351,7 +353,7 @@ async function moderate(text, user) {
         ? ' That was a second strike, so this identity is now paused. You can still read.'
         : ` This counts as a strike (${u.strikes} of ${CONFIG.strikesToBan}).`;
     }
-    throw new HttpError(422, message, { moderation: true, strike: !!result.severe });
+    throw new HttpError(422, message, { moderation: true, strike: !!result.severe, ...(result.severe && user ? { paused: !!(await dbGet('SELECT banned FROM users WHERE id = ?', user.id))?.banned } : {}) });
   }
   return { support: result.support, hold: result.hold };
 }
@@ -370,8 +372,9 @@ async function addStrike(userId) {
   (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
   forgetUser(userId);
   if (banned && !u.banned) {
-    if (u.ip_hash) {
-      (await dbRun('INSERT OR REPLACE INTO banned_ips (ip_hash, until) VALUES (?, ?)', u.ip_hash, now() + CONFIG.ipBanDays * 86_400_000));
+    // Their networks (where they signed up and last signed in) can only start new identities through Google.
+    for (const ip of new Set([u.ip_hash, u.last_ip].filter(Boolean))) {
+      (await dbRun('INSERT OR REPLACE INTO banned_ips (ip_hash, until) VALUES (?, ?)', ip, now() + CONFIG.ipBanDays * 86_400_000));
     }
     // A banned identity's content leaves the board.
     for (const [type, table] of Object.entries(TABLES)) {
@@ -391,7 +394,7 @@ async function removeStrike(userId) {
   const banned = strikes >= CONFIG.strikesToBan ? 1 : 0;
   (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
   forgetUser(userId);
-  if (!banned && u.banned && u.ip_hash) (await dbRun('DELETE FROM banned_ips WHERE ip_hash = ?', u.ip_hash));
+  if (!banned && u.banned) for (const ip of [u.ip_hash, u.last_ip].filter(Boolean)) (await dbRun('DELETE FROM banned_ips WHERE ip_hash = ?', ip));
   sendTo(userId, 'me', publicMe({ ...u, strikes, banned }));
 }
 
@@ -569,10 +572,22 @@ route('GET', /^\/api\/quote$/, async () => {
   return { day, quote: quoteFor(day), quotes: quotesFor(day), notes: stats.notes, replies: replies.c, online: clients.size };
 });
 
-async function signupAllowed(ip) {
+// After an identity is paused (2 strikes), its networks and device can't simply make a fresh
+// password identity. New identities from there must come through Google, where one Google
+// account is one identity for good, so a paused person can't keep starting over.
+const DEVICE_MARK = 'kb_mark';
+function markDevice(req, res) {
+  if (parseCookies(req)[DEVICE_MARK]) return;
+  addCookie(res, `${DEVICE_MARK}=1; Path=/; HttpOnly; SameSite=Lax; Max-Age=${365 * 86400}${isHttps(req) ? '; Secure' : ''}`);
+}
+async function signupAllowed(ip, req, { viaGoogle = false } = {}) {
   if (hits(`signup:${ip}`, 3_600_000).length >= 10) throw new HttpError(429, 'Too many new identities from here. Try again later.');
+  if (viaGoogle) return; // a Google account that's already paused just signs back in to its paused identity
   const ban = (await dbGet('SELECT until FROM banned_ips WHERE ip_hash = ?', ip));
-  if (ban && ban.until > now()) throw new HttpError(403, 'New identities are paused from this network for a little while.', { banned: true });
+  const flagged = (ban && ban.until > now()) || !!parseCookies(req)[DEVICE_MARK];
+  if (!flagged) return;
+  if (googleReady()) throw new HttpError(403, 'To start a new identity here, please use Continue with Google. (An identity on this network or device was paused for breaking the rules.)', { banned: true, needGoogle: true });
+  throw new HttpError(403, 'New identities are paused from this network for a little while.', { banned: true });
 }
 async function newHandle(animal) {
   for (let i = 0; i < 20; i++) {
@@ -584,7 +599,7 @@ async function newHandle(animal) {
 
 route('POST', /^\/api\/signup$/, async ({ req, res }) => {
   const ip = ipHash(req);
-  (await signupAllowed(ip));
+  (await signupAllowed(ip, req));
   const body = await readJson(req);
   const animal = ANIMALS.includes(body.animal) ? body.animal : pick(ANIMALS);
   const handle = (await newHandle(animal));
@@ -716,7 +731,7 @@ async function googleCallback(req, res, url) {
   // first time with this Google account: a brand-new anonymous identity
   const ip = ipHash(req);
   try {
-    (await signupAllowed(ip));
+    (await signupAllowed(ip, req, { viaGoogle: true }));
   } catch (err) {
     return fail(err.extra?.banned ? 'paused' : 'busy');
   }
@@ -1233,6 +1248,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       checkCsrf(req);
       const user = (await sessionUser(req));
+      if (user?.banned) markDevice(req, res);
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = url.pathname.match(r.pattern);
@@ -1246,7 +1262,10 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('Not found');
   } catch (err) {
-    if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message, ...err.extra });
+    if (err instanceof HttpError) {
+      if (err.extra?.paused) markDevice(req, res);
+      return sendJson(res, err.status, { error: err.message, ...err.extra });
+    }
     console.error(err);
     sendJson(res, 500, { error: 'Something went wrong on our side.' });
   }
