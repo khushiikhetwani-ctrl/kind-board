@@ -881,6 +881,9 @@ body.pat-cursor, body.pat-cursor * {
 .look-stage { display: grid; place-items: center; height: 170px; border-radius: 18px; margin-bottom: 16px; background: linear-gradient(var(--bg) 70%, var(--px-grass) 70% 74%, var(--px-dirt) 74%); }
 #lookPreview { width: 112px; height: 144px; image-rendering: pixelated; margin-top: 8px; }
 .look-rows { display: grid; gap: 12px; }
+.look-mode { align-self: flex-start; width: max-content; margin-bottom: 4px; }
+.look-animal-note { text-align: center; font-size: 14px; color: var(--ink-2); margin: 4px auto 6px; max-width: 34ch; line-height: 1.5; }
+.look-animal-note:empty { display: none; }
 .look-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; }
 .look-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .look-opt { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2); padding: 0; background: var(--sw); transition: transform 0.3s var(--spring), box-shadow 0.2s; }

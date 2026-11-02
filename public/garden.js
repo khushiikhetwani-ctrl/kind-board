@@ -6,6 +6,8 @@
 // little hearts float up; butterflies flutter away from the cursor. Nothing rough, ever.
 // Everything is drawn at low resolution and scaled up with crisp pixels; all art is original.
 
+import { animalHead } from './animals.js';
+
 const TAU = Math.PI * 2;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const ease = (t) => 1 - (1 - clamp01(t)) ** 3;
@@ -22,13 +24,15 @@ const HEADS = {
   bun: ['.....hh.....', '....hhhh....', '..hhhhhhhh..', '.hhhhhhhhhh.', '.hssssssssh.', '.hsessssesh.', '.hcssssssch.', '..ssssmsss..', '...ssssss...'],
 };
 export const HAIRSTYLES = Object.keys(HEADS);
+// `style` is a hairstyle name, or ready-made head rows (an animal).
 function headFor(style, face) {
-  const rows = (HEADS[style] || HEADS.bowl).map((row) => row.split(''));
+  const rows = (Array.isArray(style) ? style : HEADS[style] || HEADS.bowl).map((row) => row.split(''));
   if (face !== 'normal') {
-    const eyeRow = rows.findIndex((row) => row.includes('e'));
+    const eyeRow = rows.findLastIndex((row) => row.includes('e'));
     const cols = rows[eyeRow].flatMap((k, i) => (k === 'e' ? [i] : []));
     for (const c of cols) {
-      rows[eyeRow][c] = 's';
+      const below = rows[eyeRow + 1]?.[c];
+      rows[eyeRow][c] = below && !'cm.'.includes(below) ? below : 's';
       if (face === 'happy') {
         // closed, smiling eyes: a tiny ^
         rows[eyeRow][c - 1] = 'e';
@@ -40,8 +44,7 @@ function headFor(style, face) {
     }
     if (face === 'happy') {
       const mouthRow = rows.findIndex((row) => row.includes('m'));
-      const mc = rows[mouthRow].indexOf('m');
-      rows[mouthRow][mc - 1] = 'm';
+      if (mouthRow >= 0) rows[mouthRow][rows[mouthRow].indexOf('m') - 1] = 'm';
     }
   }
   return rows.map((row) => row.join(''));
@@ -81,6 +84,10 @@ export const LOOKS = {
 };
 export function lookPalette(look) {
   const l = look || {};
+  if (l.animal) {
+    const a = animalHead(l.animal, l.variant);
+    if (a) return { style: a.rows, pal: { ...a.pal, j: a.suit[0], z: a.suit[1] } };
+  }
   const suit = LOOKS.suit[l.suit] || LOOKS.suit[2];
   return { style: HAIRSTYLES.includes(l.style) ? l.style : 'short', pal: { s: LOOKS.skin[l.skin] ?? LOOKS.skin[1], h: LOOKS.hair[l.hair] ?? LOOKS.hair[2], j: suit[0], z: suit[1] } };
 }

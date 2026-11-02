@@ -119,6 +119,8 @@ async function setupDatabase() {
   if (!cols.has('keep_clear')) await dbRun('ALTER TABLE notes ADD COLUMN keep_clear INTEGER NOT NULL DEFAULT 0'); // writer asked: no doodles over it
   const userCols = new Set((await dbAll('PRAGMA table_info(users)')).map((c) => c.name));
   if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
+  if (!userCols.has('variant')) await dbRun('ALTER TABLE users ADD COLUMN variant INTEGER'); // which version of their animal (colour + accessory)
+  if (!userCols.has('avatar_mode')) await dbRun("ALTER TABLE users ADD COLUMN avatar_mode TEXT NOT NULL DEFAULT 'animal'"); // 'animal' or 'custom'
   if (!userCols.has('google_hash')) await dbRun('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
   const replyCols = new Set((await dbAll('PRAGMA table_info(replies)')).map((c) => c.name));
   if (!replyCols.has('parent_id')) await dbRun('ALTER TABLE replies ADD COLUMN parent_id TEXT'); // reply to a reply
@@ -288,6 +290,19 @@ function cleanLook(raw) {
   const n = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
   return { style: HAIRSTYLES.includes(raw?.style) ? raw.style : 'short', skin: n(raw?.skin, 4), hair: n(raw?.hair, 5), suit: n(raw?.suit, 7) };
 }
+// 36 versions of every animal (6 tints x 6 accessories). Each new person gets one nobody with
+// the same animal has yet, so two Anonymous Swans never look alike (until 36 Swans exist).
+const VARIANTS = 36;
+async function assignVariant(animal) {
+  const used = new Set((await dbAll('SELECT variant FROM users WHERE animal = ? AND variant IS NOT NULL', animal)).map((r) => Number(r.variant)));
+  const free = [];
+  for (let v = 0; v < VARIANTS; v++) if (!used.has(v)) free.push(v);
+  if (free.length) return free[randomInt(free.length)];
+  // all taken: reuse the least common one
+  const counts = await dbAll('SELECT variant, COUNT(*) AS c FROM users WHERE animal = ? GROUP BY variant ORDER BY c ASC LIMIT 1', animal);
+  return Number(counts[0]?.variant ?? randomInt(VARIANTS));
+}
+const avatarMode = (u) => (u.avatar_mode === 'custom' && u.look ? 'custom' : 'animal');
 function readLook(u) {
   try { return u.look ? cleanLook(JSON.parse(u.look)) : null; } catch { return null; }
 }
@@ -295,6 +310,7 @@ function readLook(u) {
 function publicMe(u) {
   return {
     look: readLook(u),
+    variant: Number(u.variant) || 0, avatarMode: avatarMode(u),
     google: !!u.google_hash,
     hasPassword: !!u.pass_hash && u.pass_hash !== '!',
     handle: u.handle, name: displayName(u), animal: u.animal, color: u.color,
@@ -391,10 +407,10 @@ async function hideForModeration(type, id) {
 // ---------------------------------------------------------------- serializers
 
 const NOTE_SQL = `
-  SELECT n.*, u.animal, u.color AS avatar, u.look,
+  SELECT n.*, u.animal, u.color AS avatar, u.look, u.variant, u.avatar_mode,
     (SELECT COUNT(*) FROM replies r WHERE r.note_id = n.id AND r.hidden = 0) AS reply_count
   FROM notes n JOIN users u ON u.id = n.user_id`;
-const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar, u.look FROM replies r JOIN users u ON u.id = r.user_id`;
+const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar, u.look, u.variant, u.avatar_mode FROM replies r JOIN users u ON u.id = r.user_id`;
 
 // ---- emoji reactions: a small, kind set
 const REACTIONS = ['\u{1F49B}', '\u{1F917}', '\u{1FAF6}', '\u{1F60A}', '\u{1F64F}', '\u{1F331}']; // 💛 🤗 🫶 😊 🙏 🌱
@@ -419,10 +435,10 @@ async function reactionsFor(type, idsSql, args, viewerId) {
 
 const noteOut = (r) => ({
   id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, keepClear: !!r.keep_clear, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
-  name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
+  name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), variant: Number(r.variant) || 0, avatarMode: avatarMode(r), createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
-  id: r.id, noteId: r.note_id, parentId: r.parent_id || null, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), createdAt: r.created_at, userId: r.user_id,
+  id: r.id, noteId: r.note_id, parentId: r.parent_id || null, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), variant: Number(r.variant) || 0, avatarMode: avatarMode(r), createdAt: r.created_at, userId: r.user_id,
 });
 const stickerOut = (r) => ({
   id: r.id, day: r.day, kind: r.kind, content: r.content, pending: r.hidden === PENDING, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,
@@ -576,7 +592,7 @@ route('POST', /^\/api\/signup$/, async ({ req, res }) => {
   if (problem) throw new HttpError(400, problem, { field: 'passphrase' });
   hits(`signup:${ip}`, 3_600_000).push(now()); // only real sign-ups count toward the limit
   const id = randomUUID();
-  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', id, handle, await hashPassphrase(body.passphrase), animal, pick(AVATAR_COLORS), ip, now(),));
+  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, created_at, variant) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, handle, await hashPassphrase(body.passphrase), animal, pick(AVATAR_COLORS), ip, now(), await assignVariant(animal)));
   (await startSession(req, res, id, !!body.remember));
   return { me: publicMe((await dbGet('SELECT * FROM users WHERE id = ?', id))) };
 });
@@ -707,7 +723,7 @@ async function googleCallback(req, res, url) {
   hits(`signup:${ip}`, 3_600_000).push(now());
   const animal = pending.animal || pick(ANIMALS);
   const id = randomUUID();
-  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, google_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, (await newHandle(animal)), '!', animal, pick(AVATAR_COLORS), ip, gHash, now())); // '!' = no password; Google is the key
+  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, google_hash, created_at, variant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', id, (await newHandle(animal)), '!', animal, pick(AVATAR_COLORS), ip, gHash, now(), await assignVariant(animal))); // '!' = no password; Google is the key
   (await startSession(req, res, id, pending.remember));
   return redirect(res, '/calendar?google=new');
 }
@@ -724,9 +740,20 @@ route('PUT', /^\/api\/me\/look$/, async ({ req, user }) => {
   requireUser(user);
   rateLimit(`look:${user.id}`, 30, 600_000);
   const look = cleanLook(await readJson(req, 1024));
-  (await dbRun('UPDATE users SET look = ? WHERE id = ?', JSON.stringify(look), user.id));
+  (await dbRun("UPDATE users SET look = ?, avatar_mode = 'custom' WHERE id = ?", JSON.stringify(look), user.id));
   forgetUser(user.id);
-  return { me: publicMe({ ...user, look: JSON.stringify(look) }) };
+  return { me: publicMe({ ...user, look: JSON.stringify(look), avatar_mode: 'custom' }) };
+});
+
+// Switch between their animal and their custom character.
+route('PUT', /^\/api\/me\/avatar$/, async ({ req, user }) => {
+  requireUser(user);
+  rateLimit(`look:${user.id}`, 30, 600_000);
+  const body = await readJson(req, 256);
+  const mode = body.mode === 'custom' && user.look ? 'custom' : 'animal';
+  (await dbRun('UPDATE users SET avatar_mode = ? WHERE id = ?', mode, user.id));
+  forgetUser(user.id);
+  return { me: publicMe({ ...user, avatar_mode: mode }) };
 });
 
 route('GET', /^\/api\/board$/, async ({ url, user }) => {
@@ -1238,6 +1265,10 @@ async function seedWelcome() {
 }
 await setupDatabase();
 await seedWelcome();
+// Give everyone who signed up before animal characters existed their own version.
+for (const u of await dbAll("SELECT id, animal FROM users WHERE variant IS NULL AND id != 'system'")) {
+  await dbRun('UPDATE users SET variant = ? WHERE id = ?', await assignVariant(u.animal), u.id);
+}
 
 server.listen(CONFIG.port, () => {
   console.log(`[kindboard] listening on http://localhost:${CONFIG.port}  (boards roll over at midnight ${CONFIG.timeZone})`);

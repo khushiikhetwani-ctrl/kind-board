@@ -4,6 +4,7 @@
 import { DOODLES, doodleEl } from './doodles.js';
 import { EMOJI_GROUPS } from './emoji.js';
 import { startGarden, drawCharacter, characterPortrait, LOOKS, HAIRSTYLES, randomLook, WEATHERS } from './garden.js';
+import { ANIMAL_SPECS, describeVariant } from './animals.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -84,11 +85,21 @@ function shiftDay(d, n) {
   dt.setDate(dt.getDate() + n);
   return isoDay(dt);
 }
-// Everyone's avatar is their pixel character once they've made one; until then, the first letter of their animal.
+// Who someone looks like: their own custom character if they chose it, otherwise their own
+// version of their pixel animal (colour + accessory, unique among people with the same animal).
+function animalLook(who) {
+  return who?.animal && ANIMAL_SPECS[who.animal] ? { animal: who.animal, variant: who.variant || 0 } : null;
+}
+function faceOf(who) {
+  if (!who) return null;
+  if (who.avatarMode === 'custom' && who.look) return who.look;
+  return animalLook(who) || who.look || null;
+}
 function setAvatar(el, who) {
   el.style.setProperty('--av', who.avatar || who.color);
-  el.classList.toggle('has-px', !!who.look);
-  if (who.look) el.replaceChildren(h('img', { src: characterPortrait(who.look), alt: '', draggable: 'false' }));
+  const face = faceOf(who);
+  el.classList.toggle('has-px', !!face);
+  if (face) el.replaceChildren(h('img', { src: characterPortrait(face), alt: '', draggable: 'false' }));
   else el.textContent = (who.animal || '?')[0];
 }
 const displayName = (who) => (who.animal === 'Board' ? 'Kindboard' : who.name);
@@ -281,7 +292,7 @@ let garden = null;
 let visitor = null; // the same gardener, popping by on the calendar
 function showIntro() {
   if (!garden) {
-    garden = startGarden($('#garden'), { look: S.me?.look });
+    garden = startGarden($('#garden'), { look: faceOf(S.me) });
     garden.onSky(({ dark, caption, top, bottom }) => {
       const intro = $('#intro');
       intro.classList.toggle('sky-dark', dark);
@@ -300,7 +311,7 @@ function showIntro() {
     });
     garden.setEnv(currentEnv());
   }
-  garden.setLook(S.me?.look || null);
+  garden.setLook(faceOf(S.me));
   garden.play();
   const step = S.me ? 0 : Number(new URLSearchParams(location.search).get('step')) || 0;
   setIntroStep(step);
@@ -385,7 +396,7 @@ function rerollAnimal(animate = true) {
   const list = S.cfg.animals.filter((a) => a !== S.signupAnimal);
   S.signupAnimal = list[Math.floor(Math.random() * list.length)];
   const pick = $('.animal-pick');
-  setAvatar($('#pickAvatar'), { animal: S.signupAnimal, color: PICK_COLORS[Math.floor(Math.random() * PICK_COLORS.length)] });
+  setAvatar($('#pickAvatar'), { animal: S.signupAnimal, variant: Math.floor(Math.random() * 36), color: PICK_COLORS[Math.floor(Math.random() * PICK_COLORS.length)] });
   $('#pickName').textContent = `Anonymous ${S.signupAnimal}`;
   if (animate) {
     pick.classList.remove('spin');
@@ -476,7 +487,7 @@ $('[data-copy-handle]').onclick = () => copy(S.me.handle, 'Handle copied');
 
 // ---------------------------------------------------------------- the little garden: gentle pats only
 
-const myLook = () => S.me?.look || (S.me ? { style: 'short', skin: 1, hair: 2, suit: 2 } : null);
+const myLook = () => faceOf(S.me) || (S.me ? { style: 'short', skin: 1, hair: 2, suit: 2 } : null);
 function gardenFor(view) {
   return view === 'intro' ? garden : view === 'calendar' ? visitor : null;
 }
@@ -585,8 +596,24 @@ setInterval(() => { if (sky.weather === 'live') fetchLiveWeather(); }, 30 * 60_0
 // ---------------------------------------------------------------- your character
 
 let draftLook = null;
+let draftMode = 'animal';
 function renderLookDialog() {
-  drawCharacter($('#lookPreview'), draftLook, 'wave1', 'happy');
+  const animal = draftMode === 'animal';
+  for (const b of $$('[data-look-mode]')) {
+    const on = b.dataset.lookMode === draftMode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  $('#lookRows').hidden = animal;
+  $('#lookShuffle').hidden = animal;
+  $('#lookIntro').textContent = animal
+    ? 'Everyone starts as their animal. This one is yours.'
+    : 'Make a little person of your own. They walk into the garden to say hi. Pat their head to make them smile.';
+  $('#lookAnimalNote').textContent = animal
+    ? `Your ${S.me.animal}: ${describeVariant(S.me.variant)}. No other ${S.me.animal} on Kindboard looks quite like this one.`
+    : '';
+  drawCharacter($('#lookPreview'), animal ? animalLook(S.me) : draftLook, 'wave1', 'happy');
+  if (animal) return;
   const opt = (container, items, isOn, onPick, makeBtn) => {
     $(container).replaceChildren(...items.map((item, i) => {
       const b = makeBtn(item, i);
@@ -610,20 +637,25 @@ function renderLookDialog() {
 $('#googleLinkBtn').onclick = () => { if (!S.me?.google) location.href = '/auth/google/start?mode=link'; };
 $('#lookBtn').onclick = () => {
   hidePopovers();
-  draftLook = { ...myLook() };
+  draftLook = { ...(S.me?.look || { style: 'short', skin: 1, hair: 2, suit: 2 }) };
+  draftMode = S.me?.avatarMode === 'custom' && S.me.look ? 'custom' : animalLook(S.me) ? 'animal' : 'custom';
+  $('[data-look-mode="animal"]').hidden = !animalLook(S.me);
   renderLookDialog();
   $('#lookDlg').showModal();
 };
+for (const b of $$('[data-look-mode]')) b.onclick = () => { draftMode = b.dataset.lookMode; renderLookDialog(); };
 $('#lookShuffle').onclick = () => { draftLook = randomLook(); renderLookDialog(); };
 $('#lookSave').onclick = async () => {
   try {
-    const { me } = await api('PUT', '/api/me/look', draftLook);
+    const { me } = draftMode === 'animal'
+      ? await api('PUT', '/api/me/avatar', { mode: 'animal' })
+      : await api('PUT', '/api/me/look', draftLook);
     S.me = { ...S.me, ...me };
     renderMe();
-    for (const n of S.notes.values()) if (n.mine) { n.look = me.look; upsertNote(n); }
+    for (const n of S.notes.values()) if (n.mine) { Object.assign(n, { look: me.look, avatarMode: me.avatarMode, variant: me.variant }); upsertNote(n); }
     if (S.openNote && S.notes.get(S.openNote)) renderThreadNote(S.notes.get(S.openNote));
-    garden?.setLook(me.look);
-    visitor?.setLook(me.look);
+    garden?.setLook(faceOf(me));
+    visitor?.setLook(faceOf(me));
     $('#lookDlg').close();
     toast('Saved. Look out for them in the garden.');
   } catch (err) {

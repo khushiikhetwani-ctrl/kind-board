@@ -455,9 +455,14 @@
 
   <dialog id="lookDlg" class="dlg">
     <div class="dlg-head"><h2 class="serif">Your character</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
-    <p class="muted">This little person walks into the garden to say hi. Pat their head to make them smile.</p>
+    <div class="seg-toggle look-mode" role="radiogroup" aria-label="Which character">
+      <button type="button" role="radio" data-look-mode="animal">My animal</button>
+      <button type="button" role="radio" data-look-mode="custom">Custom character</button>
+    </div>
+    <p class="muted" id="lookIntro">This little one walks into the garden to say hi. Pat their head to make them smile.</p>
     <div class="look-stage"><canvas id="lookPreview" width="14" height="18" aria-label="Preview of your character"></canvas></div>
-    <div class="look-rows">
+    <p class="look-animal-note" id="lookAnimalNote"></p>
+    <div class="look-rows" id="lookRows">
       <div class="look-row"><span class="label">Hair</span><div class="look-opts" id="lookStyle" role="radiogroup" aria-label="Hairstyle"></div></div>
       <div class="look-row"><span class="label">Hair colour</span><div class="look-opts" id="lookHair" role="radiogroup" aria-label="Hair colour"></div></div>
       <div class="look-row"><span class="label">Skin</span><div class="look-opts" id="lookSkin" role="radiogroup" aria-label="Skin tone"></div></div>
