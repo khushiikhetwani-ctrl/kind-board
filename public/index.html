@@ -54,6 +54,9 @@
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
       <symbol id="i-squiggle" viewBox="0 0 24 24"><path d="M3 15c2-6 4-6 5 0s3 6 5 0 3-6 5 0 2 4 3 2"/></symbol>
       <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 16v6M8.5 3h7l-1 6.5 3.5 3.5v1.5H6V13l3.5-3.5z"/></symbol>
+      <symbol id="i-unpin" viewBox="0 0 24 24"><path d="M12 16v6M8.5 3h7l-1 6.5 3.5 3.5v1.5H6V13l3.5-3.5zM3 3l18 18"/></symbol>
+      <symbol id="i-clear" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 3"/><path d="M9 12h6"/></symbol>
       <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
       <symbol id="i-return" viewBox="0 0 24 24"><path d="M9 10 4 15l5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
     </defs>
@@ -398,9 +401,9 @@
         </div>
         <div class="opt-group" role="radiogroup" aria-label="Hold it up with">
           <span class="label">Hold with</span>
-          <button type="button" class="opt" data-fastener="pin" aria-checked="true" role="radio"><i class="fv pin"></i>Pin</button>
-          <button type="button" class="opt" data-fastener="tape" aria-checked="false" role="radio"><i class="fv tape"></i>Tape</button>
-          <button type="button" class="opt" data-fastener="none" aria-checked="false" role="radio"><i class="fv none"></i>Nothing</button>
+          <button type="button" class="opt" data-fastener="pin" aria-checked="true" role="radio"><i class="fv pin"></i>Pin (stays put)</button>
+          <button type="button" class="opt" data-fastener="tape" aria-checked="false" role="radio"><i class="fv tape"></i>Tape (movable)</button>
+          <button type="button" class="opt" data-fastener="none" aria-checked="false" role="radio"><i class="fv none"></i>Loose</button>
         </div>
       </div>
       <p class="form-error" hidden></p>

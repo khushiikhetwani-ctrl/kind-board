@@ -1003,6 +1003,27 @@ const NOTE_W = { s: 220, m: 250, l: 290 };
 let topZ = 10;
 function bringToFront(el) { el.style.zIndex = ++topZ; }
 
+// What holds a note up: a push pin when it's pinned in place, otherwise its tape, or nothing.
+function setFastener(el, n) {
+  const hold = n.pinned ? 'pin' : n.fastener === 'tape' ? 'tape' : 'none';
+  if (el.dataset.hold === hold) return;
+  el.dataset.hold = hold;
+  el.classList.remove('hold-pin', 'hold-tape', 'hold-none');
+  el.classList.add(`hold-${hold}`);
+  $(':scope > .pin, :scope > .tape', el)?.remove();
+  const hv = hashOf(n.id);
+  if (hold === 'pin') {
+    const pin = h('span', { class: 'pin', 'aria-hidden': 'true' });
+    pin.style.setProperty('--pin', PIN_COLORS[hv % PIN_COLORS.length]);
+    el.prepend(pin);
+  } else if (hold === 'tape') {
+    const tape = h('span', { class: 'tape', 'aria-hidden': 'true' });
+    tape.style.setProperty('--tape', TAPE_COLORS[hv % TAPE_COLORS.length]);
+    tape.style.setProperty('--tape-rot', `${(hv % 9) - 4}deg`);
+    el.prepend(tape);
+  }
+}
+
 function upsertNote(n) {
   S.notes.set(n.id, n);
   let el = S.noteEls.get(n.id);
@@ -1014,19 +1035,8 @@ function upsertNote(n) {
     );
     el.dataset.id = n.id;
     const hv = hashOf(n.id);
-    const fastener = n.fastener || 'pin';
-    if (fastener === 'pin') {
-      const pin = h('span', { class: 'pin', 'aria-hidden': 'true' });
-      pin.style.setProperty('--pin', PIN_COLORS[hv % PIN_COLORS.length]);
-      el.prepend(pin);
-    } else if (fastener === 'tape') {
-      const tape = h('span', { class: 'tape', 'aria-hidden': 'true' });
-      tape.style.setProperty('--tape', TAPE_COLORS[hv % TAPE_COLORS.length]);
-      tape.style.setProperty('--tape-rot', `${(hv % 9) - 4}deg`);
-      el.prepend(tape);
-    }
     el.append(h('span', { class: 'sel', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'), h('span', { class: 'sel-tag' })));
-    el.classList.add(`paper-${n.paper || 'plain'}`, `hold-${fastener}`);
+    el.classList.add(`paper-${n.paper || 'plain'}`);
     if (hv % 3 === 0) el.classList.add('curl');
     el.style.setProperty('--fd', `${6 + (hv % 5)}s`);
     el.style.setProperty('--fdl', `-${hv % 7}s`);
@@ -1040,7 +1050,8 @@ function upsertNote(n) {
   el.dataset.size = noteSize(n.text);
   el.classList.toggle('pending', !!n.pending);
   el.classList.toggle('keep-clear', !!n.keepClear);
-  el.title = n.keepClear ? 'The writer asked to keep this note clear of doodles' : '';
+  el.title = [n.pinned && 'Pinned in place', n.keepClear && 'Kept clear: nobody else can put things on it'].filter(Boolean).join(' · ');
+  setFastener(el, n);
   if (!el.classList.contains('dragging')) { // a note in someone's hand isn't yanked by updates from others
     el.style.left = `${n.x}px`;
     el.style.top = `${n.y}px`;
@@ -1085,7 +1096,12 @@ function upsertSticker(s) {
     S.stickerEls.set(s.id, el);
   }
   el.classList.toggle('pending', !!s.pending);
-  el.title = s.pending ? 'Waiting for approval. Only you can see this for now.' : '';
+  el.classList.toggle('pinned', !!s.pinned);
+  el.classList.toggle('keep-clear', !!s.keepClear);
+  if (s.pinned && !$(':scope > .mini-pin', el)) el.append(h('span', { class: 'mini-pin', 'aria-hidden': 'true' }));
+  if (!s.pinned) $(':scope > .mini-pin', el)?.remove();
+  el.title = s.pending ? 'Waiting for approval. Only you can see this for now.'
+    : [s.pinned && 'Pinned in place', s.keepClear && 'Kept clear'].filter(Boolean).join(' · ');
   if (!el.classList.contains('dragging')) {
     el.style.left = `${s.x}px`;
     el.style.top = `${s.y}px`;
@@ -1651,7 +1667,8 @@ $('#zoomReset').onclick = () => fitView();
 function bindDraggable(el, type) {
   let start = null;
   const itemOf = (t, id) => (t === 'note' ? S.notes : S.stickers).get(id);
-  const canMove = (t, item) => !!item && (t === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost());
+  const mayMove = (t, item) => !!item && (t === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost());
+  const canMove = (t, item) => mayMove(t, item) && !item.pinned;
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -1672,7 +1689,7 @@ function bindDraggable(el, type) {
       }
     }
     if (!item) return;
-    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: canMove(ttype, item), lx: e.clientX, swing: 0, el: target, type: ttype, mine: !!item.mine, frame: 0, dx: 0, dy: 0 };
+    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: canMove(ttype, item), pinned: mayMove(ttype, item) && item.pinned, lx: e.clientX, swing: 0, el: target, type: ttype, mine: !!item.mine, frame: 0, dx: 0, dy: 0 };
     bringToFront(target);
     el.setPointerCapture(e.pointerId);
   });
@@ -1692,6 +1709,13 @@ function bindDraggable(el, type) {
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
     const threshold = s.mine ? 5 : 8; // trackpad clicks wobble a few pixels; above that it's a drag
+    if (!s.drag && s.pinned && !s.hinted && Math.hypot(dx, dy) > threshold) {
+      s.hinted = true;
+      s.el.classList.remove('nope');
+      void s.el.offsetWidth;
+      s.el.classList.add('nope'); // a little wiggle: it's pinned
+      toast(s.mine ? 'Pinned in place. Unpin it (right-click or tap) to move it.' : 'Its writer pinned this one in place.');
+    }
     if (!s.drag && s.can && Math.hypot(dx, dy) > threshold) {
       s.drag = true;
       s.el.classList.add('dragging');
@@ -1761,6 +1785,7 @@ function bindDraggable(el, type) {
     if (start?.drag) settle(start);
     start = null;
   });
+  el.addEventListener('animationend', (e) => { if (e.animationName === 'nope') e.target.classList.remove('nope'); });
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (type === 'sticker') stickerMenu(el.dataset.id, e.clientX, e.clientY);
@@ -1795,8 +1820,29 @@ document.addEventListener('keydown', (e) => {
   if (!document.querySelector('dialog[open]') && S.openNote) closeThread();
 });
 
+async function changeSettings(type, id, change, done) {
+  try {
+    const res = await api('PATCH', `/api/${type}s/${id}/settings`, change);
+    if (type === 'note') {
+      upsertNote(res.note);
+      if (S.openNote === id) renderThreadNote({ ...res.note, reactions: undefined });
+    } else upsertSticker(res.sticker);
+    toast(done);
+  } catch (err) {
+    toast(err.message);
+  }
+}
 function itemActions(type, item) {
   const acts = [];
+  if (type !== 'reply' && item.mine && !S.archived && !item.pending) {
+    const what = type === 'note' ? 'note' : 'piece';
+    acts.push(item.pinned
+      ? { icon: 'unpin', label: type === 'note' ? 'Unpin (anyone can move it)' : 'Unpin (move it again)', action: () => changeSettings(type, item.id, { pinned: false }, `Unpinned. The ${what} can move now.`) }
+      : { icon: 'pin', label: 'Pin in place', action: () => changeSettings(type, item.id, { pinned: true }, `Pinned. This ${what} stays put.`) });
+    acts.push(item.keepClear
+      ? { icon: 'layers', label: 'Allow overlap', action: () => changeSettings(type, item.id, { keepClear: false }, 'Others can place things over it now.') }
+      : { icon: 'clear', label: type === 'note' ? 'Keep clear (no overlap)' : 'Keep clear (no overlap)', action: () => changeSettings(type, item.id, { keepClear: true }, 'Kept clear. Nobody else can put things on top of it.') });
+  }
   if (!item.mine) acts.push({ icon: 'flag', label: 'Report', action: () => openFlag(type, item.id) });
   if (item.mine && !S.archived) acts.push({ icon: 'trash', label: 'Delete', danger: true, action: () => deleteItem(type, item.id) });
   return acts;
@@ -1974,6 +2020,23 @@ function renderThreadNote(n) {
       h('time', { text: new Date(n.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) })),
     h('p', { class: 'note-text', text: n.text }),
     reactBar('note', n.id),
+    ...(n.mine && !S.archived && !n.pending ? [noteSettings(n)] : []),
+  );
+}
+// Your own note's two switches, right in the open note: pinned or movable, kept clear or open to overlap.
+function noteSettings(n) {
+  const chip = (on, iconName, label, change, done) => {
+    const b = h('button', { type: 'button', class: 'set-chip', role: 'switch', 'aria-checked': String(on) }, icon(iconName), label);
+    b.onclick = () => changeSettings('note', n.id, change, done);
+    return b;
+  };
+  return h('div', { class: 'note-settings' },
+    n.pinned
+      ? chip(true, 'pin', 'Pinned in place', { pinned: false }, 'Unpinned. Anyone can move it now.')
+      : chip(false, 'unpin', 'Not pinned: anyone can move it', { pinned: true }, 'Pinned. It stays put.'),
+    n.keepClear
+      ? chip(true, 'clear', 'Kept clear', { keepClear: false }, 'Others can place things over it now.')
+      : chip(false, 'layers', 'Overlap allowed', { keepClear: true }, 'Kept clear. Nobody else can put things on top of it.'),
   );
 }
 

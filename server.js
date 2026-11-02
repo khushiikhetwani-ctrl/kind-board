@@ -117,6 +117,10 @@ async function setupDatabase() {
   if (!cols.has('paper')) await dbRun("ALTER TABLE notes ADD COLUMN paper TEXT NOT NULL DEFAULT 'plain'");
   if (!cols.has('fastener')) await dbRun("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
   if (!cols.has('keep_clear')) await dbRun('ALTER TABLE notes ADD COLUMN keep_clear INTEGER NOT NULL DEFAULT 0'); // writer asked: no doodles over it
+  if (!cols.has('pinned')) { // pinned in place: nobody can drag it until its writer unpins it
+    await dbRun('ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    await dbRun("UPDATE notes SET pinned = 1 WHERE fastener = 'pin'");
+  }
   const userCols = new Set((await dbAll('PRAGMA table_info(users)')).map((c) => c.name));
   if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
   if (!userCols.has('variant')) await dbRun('ALTER TABLE users ADD COLUMN variant INTEGER'); // which version of their animal (colour + accessory)
@@ -129,6 +133,9 @@ async function setupDatabase() {
     const c = new Set((await dbAll(`PRAGMA table_info(${table})`)).map((x) => x.name));
     if (!c.has('screen')) await dbRun(`ALTER TABLE ${table} ADD COLUMN screen TEXT`); // automatic image check result
   }
+  const stickerCols = new Set((await dbAll('PRAGMA table_info(stickers)')).map((c) => c.name));
+  if (!stickerCols.has('pinned')) await dbRun('ALTER TABLE stickers ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+  if (!stickerCols.has('keep_clear')) await dbRun('ALTER TABLE stickers ADD COLUMN keep_clear INTEGER NOT NULL DEFAULT 0');
   await dbRun(`CREATE TABLE IF NOT EXISTS reactions (
     target_type TEXT NOT NULL, target_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL, created_at INTEGER NOT NULL,
     PRIMARY KEY (target_type, target_id, user_id, emoji))`);
@@ -437,7 +444,7 @@ async function reactionsFor(type, idsSql, args, viewerId) {
 }
 
 const noteOut = (r) => ({
-  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, keepClear: !!r.keep_clear, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
+  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, keepClear: !!r.keep_clear, pinned: !!r.pinned, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
   name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), variant: Number(r.variant) || 0, avatarMode: avatarMode(r), createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
@@ -445,6 +452,7 @@ const replyOut = (r) => ({
 });
 const stickerOut = (r) => ({
   id: r.id, day: r.day, kind: r.kind, content: r.content, pending: r.hidden === PENDING, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,
+  pinned: !!r.pinned, keepClear: !!r.keep_clear,
 });
 // Never expose internal user ids: replace them with a per-viewer "mine" flag.
 const forViewer = (item, viewerId) => {
@@ -829,7 +837,7 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
   const paper = PAPERS.includes(body.paper) ? body.paper : 'plain';
   const fastener = FASTENERS.includes(body.fastener) ? body.fastener : 'pin';
   const id = randomUUID();
-  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, keep_clear, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, day, user.id, text, color, paper, fastener, body.keepClear ? 1 : 0, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now()));
+  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, keep_clear, pinned, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, day, user.id, text, color, paper, fastener, body.keepClear ? 1 : 0, fastener === 'pin' ? 1 : 0, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now()));
   const note = (await getNote(id));
   emit('note', note, { hidden: hold ? PENDING : 0, user_id: user.id });
   return { note: forViewer(note, user.id), support, pending: hold };
@@ -865,7 +873,10 @@ route('PATCH', /^\/api\/notes\/([\w-]+)$/, async ({ req, user, params }) => {
   if (!row) throw new HttpError(404, 'That is no longer on the board.');
   rateLimit(`move:${user.id}`, 90, 60_000, 'Lots of rearranging! Give it a moment.');
   requireToday(row.day);
+  if (row.pinned) throw new HttpError(409, row.user_id === user.id ? 'This note is pinned in place. Unpin it to move it.' : 'Its writer pinned this note in place.', { pinned: true });
   const body = await readJson(req);
+  const [nw, nh] = NOTE_BOX[noteSizeOf(row.text)];
+  await guardClear(user, row.day, [posX(body.x, 260), posY(body.y, 200), posX(body.x, 260) + nw, posY(body.y, 200) + nh], { notesOnly: true, skip: row.id });
   (await dbRun('UPDATE notes SET x = ?, y = ? WHERE id = ?', posX(body.x, 260), posY(body.y, 200), row.id));
   const note = (await getNote(row.id));
   emit('note', note, row);
@@ -995,7 +1006,7 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   }
   const id = randomUUID();
   const size = kind === 'word' || kind === 'line' ? 0 : clamp(body.size || 72, 40, 160);
-  await guardClearNotes(user, today(), stickerBox(kind, content, posX(body.x, 60), posY(body.y, 40), size));
+  await guardClear(user, today(), stickerBox(kind, content, posX(body.x, 60), posY(body.y, 40), size));
   const hidden = kind === 'image' || kind === 'magnet' ? PENDING : 0; // hand-made pictures always get a human look
   (await dbRun('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, screen, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, screen, now()));
   const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', id)));
@@ -1018,23 +1029,56 @@ function stickerBox(kind, content, x, y, size) {
   }
   return [x, y, x + size, y + size];
 }
-async function guardClearNotes(user, day, box) {
-  const notes = await dbAll('SELECT x, y, text, user_id FROM notes WHERE day = ? AND hidden = 0 AND keep_clear = 1 AND user_id != ?', day, user.id);
+// "Keep clear" (no overlap): nobody else's pieces may land on top of it. For a note that means
+// other people's stickers, words, drawings and notes; for a sticker, other people's stickers.
+const overlaps = (a, b, pad = 6) => a[0] < b[2] + pad && a[2] > b[0] - pad && a[1] < b[3] + pad && a[3] > b[1] - pad;
+async function guardClear(user, day, box, { notesOnly = false, skip = null } = {}) {
+  const notes = await dbAll('SELECT id, x, y, text FROM notes WHERE day = ? AND hidden = 0 AND keep_clear = 1 AND user_id != ?', day, user.id);
   for (const n of notes) {
+    if (n.id === skip) continue;
     const [w, hgt] = NOTE_BOX[noteSizeOf(n.text)];
-    const pad = 6;
-    if (box[0] < n.x + w + pad && box[2] > n.x - pad && box[1] < n.y + hgt + pad && box[3] > n.y - pad) {
+    if (overlaps(box, [n.x, n.y, n.x + w, n.y + hgt])) {
       throw new HttpError(409, 'That note\u2019s writer asked to keep it clear. Try a spot beside it?', { keepClear: true });
     }
   }
+  if (notesOnly) return;
+  const pieces = await dbAll('SELECT id, kind, content, x, y, size FROM stickers WHERE day = ? AND hidden = 0 AND keep_clear = 1 AND user_id != ?', day, user.id);
+  for (const p of pieces) {
+    if (p.id === skip) continue;
+    if (overlaps(box, stickerBox(p.kind, p.content, p.x, p.y, p.size), 2)) {
+      throw new HttpError(409, 'Whoever placed that asked to keep it clear. Try a spot beside it?', { keepClear: true });
+    }
+  }
 }
+
+// Pin / unpin and keep clear / allow overlap, for your own notes and pieces.
+route('PATCH', /^\/api\/(note|sticker)s\/([\w-]+)\/settings$/, async ({ req, user, params }) => {
+  requirePoster(user);
+  const [type, id] = params;
+  const row = await ownedRow(type, id, user);
+  requireToday(row.day);
+  rateLimit(`settings:${user.id}`, 60, 60_000);
+  const body = await readJson(req, 256);
+  const table = TABLES[type];
+  if (typeof body.pinned === 'boolean') await dbRun(`UPDATE ${table} SET pinned = ? WHERE id = ?`, body.pinned ? 1 : 0, id);
+  if (typeof body.keepClear === 'boolean') await dbRun(`UPDATE ${table} SET keep_clear = ? WHERE id = ?`, body.keepClear ? 1 : 0, id);
+  if (type === 'note') {
+    const note = await getNote(id);
+    emit('note', note, row);
+    return { note: forViewer(note, user.id) };
+  }
+  const sticker = stickerOut(await dbGet('SELECT * FROM stickers WHERE id = ?', id));
+  emit('sticker', sticker, row);
+  return { sticker: forViewer(sticker, user.id) };
+});
 
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
   const row = (await ownedRow('sticker', params[0], user));
   requireToday(row.day);
+  if (row.pinned) throw new HttpError(409, 'This is pinned in place. Unpin it to move it.', { pinned: true });
   const body = await readJson(req);
-  await guardClearNotes(user, row.day, stickerBox(row.kind, row.content, posX(body.x, 60), posY(body.y, 40), row.size));
+  await guardClear(user, row.day, stickerBox(row.kind, row.content, posX(body.x, 60), posY(body.y, 40), row.size), { skip: row.id });
   (await dbRun('UPDATE stickers SET x = ?, y = ? WHERE id = ?', posX(body.x, 60), posY(body.y, 40), row.id));
   const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', row.id)));
   emit('sticker', sticker, row);

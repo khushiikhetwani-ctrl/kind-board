@@ -1106,3 +1106,18 @@ body.pat-cursor, body.pat-cursor * {
 /* smooth dragging: the piece in hand gets its own layer, and the board holds still meanwhile */
 .note.dragging, .sticker.dragging { animation: none; will-change: translate, rotate; }
 .board-view.moving .note, #viewport.panning .note, #viewport.scrolling .note { animation-play-state: paused; }
+
+/* pinned pieces wear a tiny push pin; a kept-clear piece gets a faint dashed halo on hover */
+.sticker .mini-pin { position: absolute; top: -5px; left: 50%; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; pointer-events: none; z-index: 2;
+  background: radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.8) 0 1px, transparent 2px), #d9534f; box-shadow: 0 2px 2px -1px rgba(22, 21, 19, 0.4); }
+.sticker.line .mini-pin { top: 4px; left: 14px; margin: 0; }
+.sticker.keep-clear:hover { outline: 1.5px dashed color-mix(in srgb, var(--ink) 30%, transparent); outline-offset: 4px; border-radius: 6px; }
+/* trying to drag something pinned: a small wiggle */
+.nope { animation: nope 0.4s var(--ease); }
+@keyframes nope { 25% { translate: -3px 0; } 50% { translate: 3px 0; } 75% { translate: -2px 0; } }
+
+.note-settings { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed color-mix(in srgb, var(--note-ink) 18%, transparent); }
+.set-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--note-ink) 18%, transparent); background: transparent; color: var(--note-ink-2); font: 500 12.5px var(--sans); cursor: pointer; transition: background 0.2s, color 0.2s; }
+.set-chip .i { width: 14px; height: 14px; }
+.set-chip[aria-checked="true"] { background: color-mix(in srgb, var(--note-ink) 9%, transparent); color: var(--note-ink); }
+.set-chip:hover { background: color-mix(in srgb, var(--note-ink) 12%, transparent); }
