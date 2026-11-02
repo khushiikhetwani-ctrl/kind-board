@@ -1102,3 +1102,7 @@ body.pat-cursor, body.pat-cursor * {
 /* "please use Google" after a paused identity: a gentle pulse around the button */
 .btn.google.nudge { animation: nudge 1.4s var(--spring) 2; }
 @keyframes nudge { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 40% { box-shadow: 0 0 0 4px color-mix(in srgb, #4285f4 35%, transparent); } }
+
+/* smooth dragging: the piece in hand gets its own layer, and the board holds still meanwhile */
+.note.dragging, .sticker.dragging { animation: none; will-change: translate, rotate; }
+.board-view.moving .note, #viewport.panning .note { animation-play-state: paused; }

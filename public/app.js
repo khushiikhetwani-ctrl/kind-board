@@ -1086,8 +1086,10 @@ function upsertSticker(s) {
   }
   el.classList.toggle('pending', !!s.pending);
   el.title = s.pending ? 'Waiting for approval. Only you can see this for now.' : '';
-  el.style.left = `${s.x}px`;
-  el.style.top = `${s.y}px`;
+  if (!el.classList.contains('dragging')) {
+    el.style.left = `${s.x}px`;
+    el.style.top = `${s.y}px`;
+  }
   if (s.kind !== 'word' && s.kind !== 'line') {
     el.style.width = el.style.height = `${s.size}px`;
     el.style.fontSize = `${s.size * 0.8}px`;
@@ -1629,50 +1631,83 @@ $('#zoomReset').onclick = () => fitView();
 // Notes & stickers: tap to open / show a menu; your own can be dragged (today only).
 function bindDraggable(el, type) {
   let start = null;
+  const itemOf = (t, id) => (t === 'note' ? S.notes : S.stickers).get(id);
+  const canMove = (t, item) => !!item && (t === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost());
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     hidePopovers();
     if (S.placing) return placeAt(e.clientX, e.clientY);
     if (pen.on) return penDown(e);
-    const item = (type === 'note' ? S.notes : S.stickers).get(el.dataset.id);
-    // Anyone can rearrange today's notes; stickers, words and lines move only for whoever placed them.
-    const movable = type === 'note' ? canPost() && (!item.pending || item.mine) : item.mine && canPost();
-    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: movable, lx: e.clientX, swing: 0 };
-    bringToFront(el);
+    // What actually moves. Anyone can rearrange today's notes; stickers, words and lines move only
+    // for whoever placed them. Pressing on someone else's piece that sits on a note grabs the note.
+    let target = el;
+    let ttype = type;
+    let item = itemOf(type, el.dataset.id);
+    if (type === 'sticker' && !canMove(type, item)) {
+      const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
+      if (under && canMove('note', itemOf('note', under.dataset.id))) {
+        target = under;
+        ttype = 'note';
+        item = itemOf('note', under.dataset.id);
+      }
+    }
+    if (!item) return;
+    start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: canMove(ttype, item), lx: e.clientX, swing: 0, el: target, type: ttype, mine: !!item.mine, frame: 0, dx: 0, dy: 0 };
+    bringToFront(target);
     el.setPointerCapture(e.pointerId);
   });
+  // While dragging, the piece rides on its own GPU layer and only its `translate` changes, once per
+  // frame: no page layout, and nothing underneath has to be repainted.
+  const paint = () => {
+    const s = start;
+    if (!s) return;
+    s.frame = 0;
+    s.el.style.translate = `${s.dx / S.cam.z}px ${s.dy / S.cam.z}px`;
+    s.el.style.rotate = `${s.swing}deg`;
+  };
   el.addEventListener('pointermove', (e) => {
     if (pen.stroke) return penMove(e);
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    const item = (type === 'note' ? S.notes : S.stickers).get(el.dataset.id);
-    const threshold = item?.mine ? 6 : 14; // moving someone else's note takes a deliberate drag
-    if (!start.drag && Math.hypot(dx, dy) > threshold && start.can) {
-      start.drag = true;
-      el.classList.add('dragging');
+    const s = start;
+    if (!s) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    const threshold = s.mine ? 4 : 8; // a little more deliberate for someone else's note
+    if (!s.drag && s.can && Math.hypot(dx, dy) > threshold) {
+      s.drag = true;
+      s.el.classList.add('dragging');
+      $('.board-view')?.classList.add('moving');
     }
-    if (start.drag) {
-      el.style.left = `${start.ix + dx / S.cam.z}px`;
-      el.style.top = `${start.iy + dy / S.cam.z}px`;
-      // swing like paper hanging from a hand
-      start.swing = Math.max(-14, Math.min(14, start.swing * 0.7 + (e.clientX - start.lx) * 0.9));
-      start.lx = e.clientX;
-      el.style.rotate = `${start.swing}deg`;
-    }
+    if (!s.drag) return;
+    s.dx = dx;
+    s.dy = dy;
+    // swing like paper hanging from a hand
+    s.swing = Math.max(-14, Math.min(14, s.swing * 0.7 + (e.clientX - s.lx) * 0.9));
+    s.lx = e.clientX;
+    if (!s.frame) s.frame = requestAnimationFrame(paint);
   });
+  const settle = (s, x, y) => {
+    cancelAnimationFrame(s.frame);
+    s.el.classList.remove('dragging');
+    $('.board-view')?.classList.remove('moving');
+    if (x !== undefined) {
+      s.el.style.left = `${x}px`;
+      s.el.style.top = `${y}px`;
+    }
+    s.el.style.translate = '';
+    s.el.style.rotate = '';
+  };
   el.addEventListener('pointerup', async (e) => {
     if (pen.stroke) return penUp();
     if (!start) return;
     const s = start;
     start = null;
-    const id = el.dataset.id;
     if (!s.drag) {
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 8) return;
-      if (type === 'note') return openThread(id);
+      if (s.type === 'note') return openThread(s.el.dataset.id);
       // Someone else's scribble or sticker on top of a note shouldn't get in the way of reading it:
       // a tap goes through to the note. Your own pieces still open their menu (move/delete).
+      const id = el.dataset.id;
       const piece = S.stickers.get(id);
       if (!piece?.mine) {
         const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
@@ -1681,27 +1716,31 @@ function bindDraggable(el, type) {
       stickerMenu(id, e.clientX, e.clientY);
       return;
     }
-    el.classList.remove('dragging');
-    el.style.rotate = '';
+    const id = s.el.dataset.id;
     const x = s.ix + (e.clientX - s.x) / S.cam.z;
     const y = s.iy + (e.clientY - s.y) / S.cam.z;
+    settle(s, x, y);
+    const local = itemOf(s.type, id);
+    if (local) Object.assign(local, { x, y }); // stay put while the server confirms
     try {
-      const res = await api('PATCH', `/api/${type}s/${id}`, { x, y });
-      if (type === 'note') upsertNote(res.note);
+      const res = await api('PATCH', `/api/${s.type}s/${id}`, { x, y });
+      if (s.type === 'note') upsertNote(res.note);
       else {
         upsertSticker(res.sticker);
         if (res.sticker.kind === 'word') S.chain = { id };
       }
     } catch (err) {
       toast(err.message);
-      const item = (type === 'note' ? S.notes : S.stickers).get(id);
-      if (item) type === 'note' ? upsertNote(item) : upsertSticker(item);
+      const item = itemOf(s.type, id);
+      if (item) {
+        Object.assign(item, { x: s.ix, y: s.iy });
+        s.type === 'note' ? upsertNote(item) : upsertSticker(item);
+      }
     }
   });
   el.addEventListener('pointercancel', () => {
+    if (start?.drag) settle(start);
     start = null;
-    el.style.rotate = '';
-    el.classList.remove('dragging');
   });
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
