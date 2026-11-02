@@ -1121,3 +1121,7 @@ body.pat-cursor, body.pat-cursor * {
 .set-chip .i { width: 14px; height: 14px; }
 .set-chip[aria-checked="true"] { background: color-mix(in srgb, var(--note-ink) 9%, transparent); color: var(--note-ink); }
 .set-chip:hover { background: color-mix(in srgb, var(--note-ink) 12%, transparent); }
+
+/* the board never selects text or shows a drag ghost; it's all pick-up-and-move */
+#viewport, #viewport * { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
+#viewport ::selection { background: transparent; }

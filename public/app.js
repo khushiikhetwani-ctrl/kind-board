@@ -1579,6 +1579,7 @@ let pinch = null;
 let momentum = null;
 viewport.addEventListener('pointerdown', (e) => {
   if (e.target.closest('.note, .sticker')) return;
+  e.preventDefault(); // panning, not selecting
   cancelAnimationFrame(camAnim);
   cancelAnimationFrame(momentum);
   hidePopovers();
@@ -1664,6 +1665,13 @@ $('#zoomOut').onclick = () => zoomBy(0.8);
 $('#zoomReset').onclick = () => fitView();
 
 // Notes & stickers: tap to open / show a menu; your own can be dragged (today only).
+// show a tip a couple of times per browser, then stop
+function hintOnce(key, times = 2) {
+  const n = Number(store.get(key) || 0);
+  if (n >= times) return false;
+  store.set(key, String(n + 1));
+  return true;
+}
 function bindDraggable(el, type) {
   let start = null;
   const itemOf = (t, id) => (t === 'note' ? S.notes : S.stickers).get(id);
@@ -1676,23 +1684,43 @@ function bindDraggable(el, type) {
     hidePopovers();
     if (S.placing) return placeAt(e.clientX, e.clientY);
     if (pen.on) return penDown(e);
-    // What actually moves. Anyone can rearrange today's notes; stickers, words and lines move only
-    // for whoever placed them. Pressing on someone else's piece that sits on a note grabs the note.
+    e.preventDefault(); // no text selection or native drag ghost while handling the board
+    // What actually moves. Notes and word tiles can be rearranged by anyone; other stickers and
+    // drawings only by whoever placed them. If you press on something you can't move (say,
+    // someone's big scribble over a word), you pick up the topmost thing underneath that you can.
     let target = el;
     let ttype = type;
     let item = itemOf(type, el.dataset.id);
-    if (type === 'sticker' && !canMove(type, item)) {
-      const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
-      if (under && canMove('note', itemOf('note', under.dataset.id))) {
-        target = under;
-        ttype = 'note';
-        item = itemOf('note', under.dataset.id);
-      }
+    const stack = () => document.elementsFromPoint(e.clientX, e.clientY)
+      .map((x) => x.closest('#stickerLayer .sticker, #noteLayer .note'))
+      .filter((x, i, all) => x && x !== el && all.indexOf(x) === i)
+      .map((piece) => {
+        const t = piece.classList.contains('note') ? 'note' : 'sticker';
+        return { piece, t, it: itemOf(t, piece.dataset.id) };
+      });
+    const take = (found) => { if (found) ({ piece: target, t: ttype, it: item } = found); return !!found; };
+    if (type === 'sticker' && item?.kind === 'line') {
+      // drawings are big and words are small: pressing where a word or sticker shows through a
+      // drawing (even your own) picks up the word, not the whole drawing
+      take(stack().find((f) => f.t === 'sticker' && f.it?.kind !== 'line' && canMove(f.t, f.it)));
+    }
+    if (target === el && !canMove(type, item) && !(item?.mine && item.pinned)) {
+      take(stack().find((f) => canMove(f.t, f.it)));
     }
     if (!item) return;
     start = { x: e.clientX, y: e.clientY, ix: item.x, iy: item.y, drag: false, can: canMove(ttype, item), pinned: mayMove(ttype, item) && item.pinned, lx: e.clientX, swing: 0, el: target, type: ttype, mine: !!item.mine, frame: 0, dx: 0, dy: 0 };
     bringToFront(target);
     el.setPointerCapture(e.pointerId);
+    // press and hold (without moving) for the options menu; right-click works too
+    const menuFor = target;
+    const menuType = ttype;
+    const [mx, my] = [e.clientX, e.clientY];
+    start.hold = setTimeout(() => {
+      if (!start || start.drag) return;
+      start.menued = true;
+      if (menuType === 'note') noteMenu(menuFor.dataset.id, mx, my);
+      else stickerMenu(menuFor.dataset.id, mx, my);
+    }, 550);
   });
   // While dragging, the piece rides on its own GPU layer and only its `translate` changes, once per
   // frame: no page layout, and nothing underneath has to be repainted.
@@ -1717,7 +1745,8 @@ function bindDraggable(el, type) {
       s.el.classList.add('nope'); // a little wiggle: it's pinned
       toast(s.mine ? 'Pinned in place. Unpin it (right-click or tap) to move it.' : 'Whoever placed this pinned it in place.');
     }
-    if (!s.drag && s.can && Math.hypot(dx, dy) > threshold) {
+    if (Math.hypot(dx, dy) > threshold) clearTimeout(s.hold);
+    if (!s.drag && s.can && !s.menued && Math.hypot(dx, dy) > threshold) {
       s.drag = true;
       s.el.classList.add('dragging');
       $('.board-view')?.classList.add('moving');
@@ -1746,18 +1775,16 @@ function bindDraggable(el, type) {
     if (!start) return;
     const s = start;
     start = null;
+    clearTimeout(s.hold);
+    if (s.menued) return;
     if (!s.drag) {
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 8) return;
       if (s.type === 'note') return openThread(s.el.dataset.id);
-      // Someone else's scribble or sticker on top of a note shouldn't get in the way of reading it:
-      // a tap goes through to the note. Your own pieces still open their menu (move/delete).
-      const id = el.dataset.id;
-      const piece = S.stickers.get(id);
-      if (!piece?.mine) {
-        const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
-        if (under) return openThread(under.dataset.id);
-      }
-      stickerMenu(id, e.clientX, e.clientY);
+      // A click on a sticker, word or drawing doesn't pop a menu in your way (hold or right-click
+      // for options). Over a note, it opens the note underneath.
+      const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
+      if (under) return openThread(under.dataset.id);
+      if (s.can && hintOnce('kb_hint_hold')) toast('To move it, press and hold, then drag. Hold still (or right-click) for options.', 5000);
       return;
     }
     const id = s.el.dataset.id;
@@ -1784,6 +1811,7 @@ function bindDraggable(el, type) {
   });
   el.addEventListener('pointercancel', () => {
     if (start?.drag) settle(start);
+    if (start) clearTimeout(start.hold);
     start = null;
   });
   el.addEventListener('animationend', (e) => { if (e.animationName === 'nope') e.target.classList.remove('nope'); });
