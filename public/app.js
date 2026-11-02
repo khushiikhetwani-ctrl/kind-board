@@ -979,6 +979,10 @@ function upsertNote(n) {
   t.dateTime = new Date(n.createdAt).toISOString();
   $('.note-text', el).textContent = n.text;
   const rc = n.replyCount;
+  $('.react-sum', el)?.remove();
+  const sum = reactSummary(n.reactions);
+  if (sum && !n.pending) $('.note-foot', el).prepend(sum);
+  if (n.reactions) S.reacts.set(reactKey('note', n.id), n.reactions);
   $('.replies', el).replaceChildren(...(n.pending
     ? [icon('clock'), 'Waiting for approval']
     : [icon('message'), rc ? `${rc} ${rc === 1 ? 'reply' : 'replies'}` : S.archived ? 'No replies' : 'Write back']));
@@ -997,8 +1001,9 @@ function upsertSticker(s) {
     el.dataset.id = s.id;
     if (s.kind === 'doodle') el.append(doodleEl(s.content));
     else if (s.kind === 'emoji') el.append(h('span', { class: 'emo', text: s.content }));
-    else if (s.kind === 'word') el.textContent = s.content;
+    else if (s.kind === 'word') el.append(wordTile(wordParts(s.content), s.id));
     else if (s.kind === 'line') el.append(lineSvg(JSON.parse(s.content)));
+    else if (s.kind === 'magnet') el.append(h('span', { class: 'img-magnet' }, h('img', { src: s.content, alt: 'A magnet someone made', draggable: 'false' })));
     else el.append(h('img', { src: s.content, alt: 'A sticker someone made', draggable: 'false' }));
     el.setAttribute('aria-label', s.kind === 'image' ? 'Hand-made sticker' : s.kind === 'line' ? 'A drawn line' : s.content);
     bindDraggable(el, 'sticker');
@@ -1032,7 +1037,18 @@ function linePath(pts) {
   const last = pts[pts.length - 1];
   return `${d} L${last[0]},${last[1]}`;
 }
-function lineSvg({ p, c, w }) {
+// Each brush is a different texture on the same smooth path.
+const BRUSH_WIDTH = { pen: 1, pencil: 0.3, crayon: 1.4, highlighter: 2.6, paint: 1.5 };
+const brushWidth = (b, w) => Math.max(1.2, Math.round(w * (BRUSH_WIDTH[b] ?? 1) * 10) / 10);
+function inkStyle(path, c, w, b = 'pen') {
+  path.setAttribute('stroke', c);
+  path.setAttribute('stroke-width', w);
+  path.setAttribute('class', `line-ink brush-${b}`);
+  const filter = { pencil: 'url(#f-pencil)', crayon: 'url(#f-crayon)', paint: 'url(#f-paint)' }[b];
+  if (filter) path.setAttribute('filter', filter);
+  else path.removeAttribute('filter');
+}
+function lineSvg({ p, c, w, b = 'pen' }) {
   const maxX = Math.max(...p.map((pt) => pt[0]));
   const maxY = Math.max(...p.map((pt) => pt[1]));
   const svg = document.createElementNS(SVG, 'svg');
@@ -1044,16 +1060,32 @@ function lineSvg({ p, c, w }) {
   hit.setAttribute('d', d);
   hit.setAttribute('class', 'line-hit');
   hit.setAttribute('stroke-width', w + 14);
+  svg.setAttribute('class', `brush-svg-${b}`);
+  svg.append(hit);
+  if (b === 'paint') {
+    // a soft watery bloom underneath the paint stroke
+    const bloom = document.createElementNS(SVG, 'path');
+    bloom.setAttribute('d', d);
+    inkStyle(bloom, c, w * 1.8, 'paint');
+    bloom.classList.add('paint-bloom');
+    svg.append(bloom);
+  }
   const ink = document.createElementNS(SVG, 'path');
   ink.setAttribute('d', d);
-  ink.setAttribute('class', 'line-ink');
-  ink.setAttribute('stroke', c);
-  ink.setAttribute('stroke-width', w);
-  svg.append(hit, ink);
+  inkStyle(ink, c, w, b);
+  svg.append(ink);
   return svg;
 }
 
-const pen = { on: false, color: null, w: 6, stroke: null };
+const pen = { on: false, color: null, w: 6, brush: store.get('kb_brush') || 'pen', stroke: null };
+for (const b of $$('.pen-brush')) {
+  b.setAttribute('aria-checked', String(b.dataset.brush === pen.brush));
+  b.onclick = () => {
+    pen.brush = b.dataset.brush;
+    store.set('kb_brush', pen.brush);
+    for (const o of $$('.pen-brush')) o.setAttribute('aria-checked', String(o === b));
+  };
+}
 function setPen(on) {
   pen.on = on && canPost();
   $('#penBar').hidden = !pen.on;
@@ -1089,9 +1121,9 @@ function penDown(e) {
   const p = toWorld(e.clientX, e.clientY);
   const live = document.createElementNS(SVG, 'svg');
   live.setAttribute('class', 'line-live');
+  live.classList.add(`brush-svg-${pen.brush}`);
   const path = document.createElementNS(SVG, 'path');
-  path.setAttribute('stroke', pen.color);
-  path.setAttribute('stroke-width', pen.w);
+  inkStyle(path, pen.color, brushWidth(pen.brush, pen.w), pen.brush);
   live.append(path);
   stickerLayer.append(live);
   pen.stroke = { pts: [[p.x, p.y]], live, path };
@@ -1116,7 +1148,7 @@ async function penUp() {
   const minY = Math.min(...pts.map((p) => p[1]));
   const rel = pts.map(([x, y]) => [Math.round(x - minX), Math.round(y - minY)]);
   try {
-    const { sticker } = await api('POST', '/api/stickers', { kind: 'line', content: { p: rel, c: pen.color, w: pen.w }, x: minX, y: minY });
+    const { sticker } = await api('POST', '/api/stickers', { kind: 'line', content: { p: rel, c: pen.color, w: brushWidth(pen.brush, pen.w), b: pen.brush }, x: minX, y: minY });
     upsertSticker(sticker);
   } catch (err) {
     toast(err.message);
@@ -1627,7 +1659,9 @@ async function openThread(id) {
     const data = await api('GET', `/api/notes/${id}`);
     if (S.openNote !== id) return;
     renderThreadNote(data.note);
-    $('.reply-list').replaceChildren(...data.replies.map(replyEl));
+    $('.reply-list').replaceChildren();
+    setReplyTo(null);
+    for (const r of data.replies) placeReply(replyEl(r), r);
     updateRepliesLabel();
   } catch (e) {
     toast(e.message);
@@ -1635,7 +1669,69 @@ async function openThread(id) {
   }
 }
 
+// ---- emoji reactions: a small, kind set, toggled per person
+S.reacts = new Map(); // "note:id" / "reply:id" -> { emoji: { n, mine } }
+const reactKey = (type, id) => `${type}:${id}`;
+function reactSummary(reactions = {}) {
+  const top = Object.entries(reactions).filter(([, v]) => v.n > 0).sort((a, b) => b[1].n - a[1].n);
+  if (!top.length) return null;
+  const total = top.reduce((sum, [, v]) => sum + v.n, 0);
+  return h('span', { class: 'react-sum', 'aria-label': `${total} reactions` }, top.slice(0, 3).map(([e]) => e).join(''), ` ${total}`);
+}
+function reactBar(type, id) {
+  const bar = h('div', { class: 'reacts' });
+  bar.dataset.react = reactKey(type, id);
+  paintReactBar(bar);
+  return bar;
+}
+function paintReactBar(bar) {
+  const [type, id] = bar.dataset.react.split(':');
+  const data = S.reacts.get(bar.dataset.react) || {};
+  const can = canPost() && !S.notes.get(type === 'note' ? id : S.openNote)?.pending;
+  const chips = (S.cfg.reactions || []).filter((e) => data[e]?.n > 0).map((e) => {
+    const b = h('button', { type: 'button', class: `react-chip${data[e].mine ? ' mine' : ''}`, 'aria-pressed': String(!!data[e].mine), 'aria-label': `${e} ${data[e].n}`, disabled: !can }, e, h('span', { text: String(data[e].n) }));
+    b.onclick = () => toggleReaction(type, id, e);
+    return b;
+  });
+  const add = h('button', { type: 'button', class: 'react-add', 'aria-label': 'Add a reaction', disabled: !can, title: 'React' }, '\u{1F642}', h('span', { text: '+' }));
+  add.onclick = (ev) => {
+    ev.stopPropagation();
+    const r = ev.currentTarget.getBoundingClientRect();
+    const pick = $('#menu');
+    pick.replaceChildren(h('div', { class: 'react-pick' }, ...(S.cfg.reactions || []).map((e) => h('button', { type: 'button', class: 'react-opt', text: e, 'aria-label': `React ${e}`, onclick: () => { hidePopovers(); toggleReaction(type, id, e); } }))));
+    pick.hidden = false;
+    pick.style.left = `${Math.max(12, Math.min(r.left, innerWidth - 260))}px`;
+    pick.style.top = `${Math.max(12, r.top - 54)}px`;
+  };
+  bar.replaceChildren(...chips, ...(can ? [add] : []));
+}
+async function toggleReaction(type, id, emoji) {
+  const key = reactKey(type, id);
+  const data = { ...(S.reacts.get(key) || {}) };
+  const was = data[emoji]?.mine;
+  data[emoji] = { n: Math.max(0, (data[emoji]?.n || 0) + (was ? -1 : 1)), mine: !was }; // feels instant
+  setReactions(type, id, data);
+  try {
+    const res = await api('POST', '/api/react', { type, id, emoji });
+    const fresh = {};
+    for (const [e, n] of Object.entries(res.counts)) fresh[e] = { n, mine: e === emoji ? res.mine : !!S.reacts.get(key)?.[e]?.mine };
+    setReactions(type, id, fresh);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+function setReactions(type, id, data) {
+  S.reacts.set(reactKey(type, id), data);
+  for (const bar of $$(`[data-react="${CSS.escape(reactKey(type, id))}"]`)) paintReactBar(bar);
+  if (type === 'note' && S.notes.has(id)) {
+    S.notes.get(id).reactions = data;
+    const el = S.noteEls.get(id);
+    if (el) $('.react-sum', el)?.remove(), (() => { const sum = reactSummary(data); if (sum) $('.note-foot', el).prepend(sum); })();
+  }
+}
+
 function renderThreadNote(n) {
+  if (n.reactions) S.reacts.set(reactKey('note', n.id), n.reactions);
   const card = $('.thread-note');
   card.dataset.color = n.color;
   const av = h('span', { class: 'avatar' });
@@ -1644,6 +1740,7 @@ function renderThreadNote(n) {
     h('header', { class: 'note-head' }, av, h('span', { class: 'note-name' }, displayName(n), ...(n.mine ? [h('span', { class: 'you', text: 'you' })] : [])),
       h('time', { text: new Date(n.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) })),
     h('p', { class: 'note-text', text: n.text }),
+    reactBar('note', n.id),
   );
 }
 
@@ -1656,15 +1753,34 @@ function replyEl(r) {
     const b = e.currentTarget.getBoundingClientRect();
     if (acts.length) showMenu(b.right - 180, b.bottom + 4, acts);
   };
-  const li = h('li', { class: `reply${r.mine ? ' mine' : ''}${r.pending ? ' pending' : ''}` },
+  if (r.reactions) S.reacts.set(reactKey('reply', r.id), r.reactions);
+  const replyBtn = h('button', { type: 'button', class: 'reply-to', text: 'Reply' });
+  replyBtn.onclick = () => setReplyTo(r);
+  const li = h('li', { class: `reply${r.mine ? ' mine' : ''}${r.pending ? ' pending' : ''}${r.parentId ? ' nested' : ''}` },
     av,
     h('div', {},
       h('div', { class: 'reply-meta' }, displayName(r), ...(r.mine ? [h('span', { class: 'you', text: 'you' })] : []), ...(r.pending ? [h('span', { class: 'wait-tag', text: 'Waiting for approval' })] : []), h('time', { text: timeAgo(r.createdAt) }), more),
       h('p', { class: 'reply-text', text: r.text }),
+      h('div', { class: 'reply-actions' }, ...(r.pending ? [] : [reactBar('reply', r.id)]), ...(canPost() && !r.pending ? [replyBtn] : [])),
+      h('ol', { class: 'reply-children' }),
     ),
   );
   li.dataset.id = r.id;
   return li;
+}
+// Replies go under the reply they answer (one level deep keeps it easy to follow).
+function placeReply(li, r) {
+  const parent = r.parentId && $(`.reply[data-id="${CSS.escape(r.parentId)}"] > div > .reply-children`);
+  (parent || $('.reply-list')).append(li);
+}
+function setReplyTo(r) {
+  S.replyTo = r ? { id: r.parentId || r.id, name: displayName(r) } : null;
+  const chip = $('#replyToChip');
+  chip.hidden = !S.replyTo;
+  if (S.replyTo) {
+    $('#replyToName').textContent = S.replyTo.name;
+    replyText.focus();
+  }
 }
 
 function updateRepliesLabel() {
@@ -1708,6 +1824,7 @@ function copyNoteLink(id) {
 }
 
 const replyText = $('#replyText');
+$('#replyToCancel').onclick = () => setReplyTo(null);
 replyText.addEventListener('input', () => autoGrow(replyText));
 replyText.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#replyForm').requestSubmit(); });
 $('#replyForm').addEventListener('submit', async (e) => {
@@ -1717,8 +1834,9 @@ $('#replyForm').addEventListener('submit', async (e) => {
   btn.disabled = true;
   showError(form, null);
   try {
-    const { reply, support, pending } = await api('POST', `/api/notes/${S.openNote}/replies`, { text: replyText.value });
+    const { reply, support, pending } = await api('POST', `/api/notes/${S.openNote}/replies`, { text: replyText.value, parentId: S.replyTo?.id });
     addReply(reply);
+    setReplyTo(null);
     if (pending) toast(`Your reply will show for others once it\u2019s approved, because ${pending}.`, 5000);
     replyText.value = '';
     autoGrow(replyText);
@@ -1732,7 +1850,7 @@ $('#replyForm').addEventListener('submit', async (e) => {
 });
 function addReply(r) {
   if (S.openNote !== r.noteId || $(`.reply[data-id="${CSS.escape(r.id)}"]`)) return;
-  $('.reply-list').append(replyEl(r));
+  placeReply(replyEl(r), r);
   updateRepliesLabel();
   const body = $('.thread-body');
   body.scrollTo({ top: body.scrollHeight, behavior: 'smooth' });
@@ -1873,7 +1991,58 @@ for (const t of $$('.tab', tray)) t.onclick = () => openTray(t.dataset.tab);
 $('#trayClose').onclick = closeTray;
 
 // Word play: today's jumbled tiles.
+// Word tiles: a style (clipping, magnet, plain, pixel, funky, alien, doodle) and a font.
+const TILE_STYLES = { clipping: 'Clippings', magnet: 'Magnets', plain: 'Plain', pixel: 'Pixel', funky: 'Funky', alien: 'Alien', doodle: 'Doodle' };
+const TILE_FONTS = { auto: 'Auto (match the style)', oldprint: 'Old print', typewriter: 'Typewriter', boldserif: 'Bold serif', classic: 'Classic', rounded: 'Rounded', pixel: 'Pixel', funky: 'Funky', block: 'Block', space: 'Space', hand: 'Handwritten', script: 'Script', clean: 'Clean' };
+const MAGNET_COLORS = ['#e4572e', '#f3a712', '#29b6f6', '#66bb6a', '#ab47bc', '#ec407a', '#ffca28', '#26a69a'];
+S.wordStyle = TILE_STYLES[store.get('kb_tile_style')] ? store.get('kb_tile_style') : 'clipping';
+S.wordFont = TILE_FONTS[store.get('kb_tile_font')] ? store.get('kb_tile_font') : 'auto';
+function wordParts(content) {
+  if (String(content).startsWith('{')) {
+    try { return JSON.parse(content); } catch { /* fall through */ }
+  }
+  return { t: content, s: 'plain', f: 'auto' }; // tiles placed before styles existed
+}
+function wordTile({ t, s = 'plain', f = 'auto' }, seed = t) {
+  const v = hashOf(String(seed)) % 6;
+  const span = h('span', { class: `wt ws-${s} wv-${v} ws-${s}-${v % 3}` });
+  if (f && f !== 'auto') span.dataset.font = f;
+  if (s === 'magnet') {
+    // alphabet magnets: one chunky plastic letter at a time, each its own colour
+    [...t].forEach((ch, i) => {
+      const letter = h('span', { class: 'ml', text: ch });
+      letter.style.setProperty('--mc', MAGNET_COLORS[(i + v) % MAGNET_COLORS.length]);
+      letter.style.setProperty('--mr', `${((i * 37 + v * 11) % 9) - 4}deg`);
+      span.append(letter);
+    });
+  } else {
+    span.textContent = t;
+  }
+  return span;
+}
+let tileFontsLoaded = false;
+function ensureTileFonts() {
+  if (tileFontsLoaded) return;
+  tileFontsLoaded = true;
+  document.head.append(h('link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Special+Elite&family=Abril+Fatface&family=Old+Standard+TT:wght@400;700&family=Fredoka:wght@600;700&family=Silkscreen&family=Shrikhand&family=Bungee&family=Audiowide&family=Gochi+Hand&family=Caveat:wght@500;700&display=swap' }));
+}
+function renderWordLooks() {
+  $('#wordStyles').replaceChildren(...Object.entries(TILE_STYLES).map(([k, label]) => {
+    const b = h('button', { type: 'button', class: 'look-chip', role: 'radio', 'aria-checked': String(k === S.wordStyle), text: label });
+    b.onclick = () => { S.wordStyle = k; store.set('kb_tile_style', k); renderWordLooks(); renderWords(); };
+    return b;
+  }));
+  const sel = $('#wordFont');
+  if (!sel.options.length) {
+    sel.append(...Object.entries(TILE_FONTS).map(([k, label]) => h('option', { value: k, text: label })));
+    sel.onchange = () => { S.wordFont = sel.value; store.set('kb_tile_font', sel.value); renderWords(); };
+  }
+  sel.value = S.wordFont;
+}
+
 async function loadWords() {
+  ensureTileFonts();
+  renderWordLooks();
   if (S.words?.day !== S.day) {
     try {
       const data = await api('GET', `/api/words?day=${S.day}`);
@@ -1885,7 +2054,7 @@ async function loadWords() {
   renderWords();
 }
 function tileButton(word, glue = false) {
-  const b = h('button', { class: 'tile', type: 'button', text: word, 'aria-label': `Word tile: ${word}` });
+  const b = h('button', { class: 'tile', type: 'button', 'aria-label': `Word tile: ${word}` }, wordTile({ t: word, s: S.wordStyle, f: S.wordFont }));
   b.style.setProperty('--r', `${(Math.random() * 4 - 2).toFixed(1)}deg`);
   b.onclick = () => useWord(word);
   if (glue) b.dataset.glue = '1';
@@ -1924,14 +2093,25 @@ function useWord(word) {
   const lastEl = S.chain && S.stickerEls.get(S.chain.id);
   if (last && lastEl) {
     const tight = /^[-?!.,]/.test(word);
-    postSticker({ kind: 'word', content: word }, last.x + lastEl.offsetWidth + (tight ? 1 : 5), last.y + (Math.random() * 4 - 2));
+    postSticker({ kind: 'word', content: word, style: S.wordStyle, font: S.wordFont }, last.x + lastEl.offsetWidth + (tight ? 1 : 5), last.y + (Math.random() * 4 - 2));
   } else {
     startPlacing({ kind: 'word', content: word });
   }
 }
 
-$('#doodleGrid').replaceChildren(...Object.keys(DOODLES).map((name) =>
-  h('button', { class: 'sticker-item', type: 'button', 'aria-label': `${name} sticker`, onclick: () => startPlacing({ kind: 'doodle', content: name }) }, doodleEl(name))));
+// Doodles come as paper stickers or glossy fridge magnets.
+S.doodleStyle = store.get('kb_doodle_style') === 'magnet' ? 'magnet' : 'sticker';
+function renderDoodles() {
+  const magnet = S.doodleStyle === 'magnet';
+  $('#doodleGrid').replaceChildren(...Object.keys(DOODLES).map((name) => {
+    const content = magnet ? `${name}:magnet` : name;
+    return h('button', { class: 'sticker-item', type: 'button', 'aria-label': `${name} ${magnet ? 'magnet' : 'sticker'}`, onclick: () => startPlacing({ kind: 'doodle', content }) }, doodleEl(content));
+  }));
+  for (const b of $$('[data-doodle-style]')) b.setAttribute('aria-checked', String(b.dataset.doodleStyle === S.doodleStyle));
+  if (S.myStickers?.length) renderMyStickers();
+}
+for (const b of $$('[data-doodle-style]')) b.onclick = () => { S.doodleStyle = b.dataset.doodleStyle; store.set('kb_doodle_style', S.doodleStyle); renderDoodles(); };
+renderDoodles();
 
 async function loadMyStickers() {
   try {
@@ -1949,8 +2129,9 @@ function renderMyStickers() {
       S.myStickers = S.myStickers.filter((x) => x.id !== s.id);
       renderMyStickers();
     };
-    return h('div', { class: 'sticker-item', role: 'button', tabindex: '0', 'aria-label': 'Your sticker', onclick: () => startPlacing({ kind: 'image', mine: s.id, content: s.data }) },
-      h('img', { src: s.data, alt: '' }), del);
+    const preview = S.doodleStyle === 'magnet' ? h('span', { class: 'img-magnet' }, h('img', { src: s.data, alt: '' })) : h('img', { src: s.data, alt: '' });
+    return h('div', { class: 'sticker-item', role: 'button', tabindex: '0', 'aria-label': 'Your sticker', onclick: () => startPlacing({ kind: S.doodleStyle === 'magnet' ? 'magnet' : 'image', mine: s.id, content: s.data }) },
+      preview, del);
   }));
 }
 
@@ -1965,7 +2146,8 @@ function startPlacing(st) {
     mini.dataset.size = noteSize(st.text);
     ghost.replaceChildren(mini);
   } else {
-    ghost.replaceChildren(st.kind === 'doodle' ? doodleEl(st.content) : st.kind === 'word' ? h('span', { class: 'tile', text: st.content }) : h('img', { src: st.content, alt: '' }));
+    ghost.replaceChildren(st.kind === 'doodle' ? doodleEl(st.content) : st.kind === 'word' ? wordTile({ t: st.content, s: S.wordStyle, f: S.wordFont })
+      : st.kind === 'magnet' ? h('span', { class: 'img-magnet' }, h('img', { src: st.content, alt: '' })) : h('img', { src: st.content, alt: '' }));
   }
   ghost.classList.toggle('wordy', st.kind === 'word' || st.kind === 'note');
   ghost.classList.toggle('noteish', st.kind === 'note');
@@ -1993,10 +2175,10 @@ function placeAt(cx, cy) {
   if (st.kind === 'note') return dropNote(st, cx, cy);
   const p = toWorld(cx, cy);
   if (st.kind === 'word') {
-    postSticker({ kind: 'word', content: st.content }, p.x - 20, p.y - 14).then(() => openTray('words')); // keep building the sentence
+    postSticker({ kind: 'word', content: st.content, style: S.wordStyle, font: S.wordFont }, p.x - 20, p.y - 14).then(() => openTray('words')); // keep building the sentence
     return;
   }
-  postSticker(st.kind === 'doodle' ? { kind: 'doodle', content: st.content } : { kind: 'image', mine: st.mine }, p.x - 38, p.y - 38);
+  postSticker(st.kind === 'doodle' ? { kind: 'doodle', content: st.content } : { kind: st.kind, mine: st.mine }, p.x - 38, p.y - 38);
 }
 async function postSticker(body, x, y) {
   try {
@@ -2085,7 +2267,7 @@ $('#saveSticker').onclick = async () => {
     S.myStickers.unshift(sticker);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     dlg.close();
-    startPlacing({ kind: 'image', mine: sticker.id, content: sticker.data });
+    startPlacing({ kind: S.doodleStyle === 'magnet' ? 'magnet' : 'image', mine: sticker.id, content: sticker.data });
   } catch (err) {
     showError(dlg, err);
   }
@@ -2127,11 +2309,19 @@ function connectStream() {
     if (n.day !== S.day) return;
     const fresh = !S.notes.has(n.id);
     const wasPending = S.notes.get(n.id)?.pending;
+    if (!n.reactions) n.reactions = S.notes.get(n.id)?.reactions || S.reacts.get(reactKey('note', n.id)) || {};
     const el = upsertNote(n);
     if (fresh) el.classList.add('fresh');
     if (wasPending && !n.pending && n.mine) toast('Your note was approved and is now on the board.', 5000);
     if (S.openNote === n.id) updateThreadLock();
     updateEmpty();
+  });
+  on('reactions', ({ type, id, counts }) => {
+    const key = reactKey(type, id);
+    const old = S.reacts.get(key) || {};
+    const data = {};
+    for (const [e, n] of Object.entries(counts)) data[e] = { n, mine: !!old[e]?.mine };
+    setReactions(type, id, data);
   });
   on('reply', (r) => {
     const existing = $(`.reply[data-id="${CSS.escape(r.id)}"]`);

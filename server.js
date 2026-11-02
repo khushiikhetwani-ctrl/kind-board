@@ -35,6 +35,8 @@ const CONFIG = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''), // e.g. https://kind-board.onrender.com
+  // Optional automatic check of hand-made stickers (Google Cloud Vision SafeSearch, free monthly quota).
+  visionKey: process.env.GOOGLE_VISION_API_KEY || '',
   accountSalt: process.env.ACCOUNT_SALT || process.env.IP_SALT || 'change-me-in-production', // never change once people sign in
   flagsToHide: Number(process.env.FLAGS_TO_HIDE) || 3, // distinct reports → back to moderator review
   strikesToBan: 2,
@@ -117,6 +119,15 @@ async function setupDatabase() {
   const userCols = new Set((await dbAll('PRAGMA table_info(users)')).map((c) => c.name));
   if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
   if (!userCols.has('google_hash')) await dbRun('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
+  const replyCols = new Set((await dbAll('PRAGMA table_info(replies)')).map((c) => c.name));
+  if (!replyCols.has('parent_id')) await dbRun('ALTER TABLE replies ADD COLUMN parent_id TEXT'); // reply to a reply
+  for (const table of ['my_stickers', 'stickers']) {
+    const c = new Set((await dbAll(`PRAGMA table_info(${table})`)).map((x) => x.name));
+    if (!c.has('screen')) await dbRun(`ALTER TABLE ${table} ADD COLUMN screen TEXT`); // automatic image check result
+  }
+  await dbRun(`CREATE TABLE IF NOT EXISTS reactions (
+    target_type TEXT NOT NULL, target_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY (target_type, target_id, user_id, emoji))`);
   await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS users_google ON users(google_hash)');
 }
 const TABLES = { note: 'notes', reply: 'replies', sticker: 'stickers' };
@@ -370,12 +381,23 @@ const NOTE_SQL = `
   FROM notes n JOIN users u ON u.id = n.user_id`;
 const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar FROM replies r JOIN users u ON u.id = r.user_id`;
 
+// ---- emoji reactions: a small, kind set
+const REACTIONS = ['\u{1F49B}', '\u{1F917}', '\u{1FAF6}', '\u{1F60A}', '\u{1F64F}', '\u{1F331}']; // 💛 🤗 🫶 😊 🙏 🌱
+// { targetId: { emoji: { n, mine } } } for a set of notes or replies
+async function reactionsFor(type, idsSql, args, viewerId) {
+  const rows = await dbAll(`SELECT target_id, emoji, COUNT(*) AS n, SUM(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS mine
+    FROM reactions WHERE target_type = ? AND target_id IN (${idsSql}) GROUP BY target_id, emoji`, viewerId, type, ...args);
+  const out = {};
+  for (const r of rows) (out[r.target_id] ??= {})[r.emoji] = { n: r.n, mine: r.mine > 0 };
+  return out;
+}
+
 const noteOut = (r) => ({
   id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
   name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
-  id: r.id, noteId: r.note_id, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, userId: r.user_id,
+  id: r.id, noteId: r.note_id, parentId: r.parent_id || null, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, userId: r.user_id,
 });
 const stickerOut = (r) => ({
   id: r.id, day: r.day, kind: r.kind, content: r.content, pending: r.hidden === PENDING, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,
@@ -496,6 +518,7 @@ const route = (method, pattern, handler) => routes.push({ method, pattern, handl
 route('GET', /^\/api\/config$/, async () => ({
   today: today(), timeZone: CONFIG.timeZone, boardW: CONFIG.boardW, boardH: CONFIG.boardH,
   google: googleReady(),
+  reactions: REACTIONS,
   noteColors: NOTE_COLORS, lineColors: LINE_COLORS, papers: PAPERS, fasteners: FASTENERS, strikesToBan: CONFIG.strikesToBan, flagsToHide: CONFIG.flagsToHide, animals: ANIMALS,
 }));
 route('GET', /^\/api\/quote$/, async () => {
@@ -684,6 +707,8 @@ route('GET', /^\/api\/board$/, async ({ url, user }) => {
   if (day > today()) throw new HttpError(404, 'That day hasn’t happened yet.');
   const notes = (await dbAll(`${NOTE_SQL} WHERE n.day = ? AND ${visibleTo('n.')} ORDER BY n.created_at`, day, user.id)).map(noteOut);
   const stickers = (await dbAll(`SELECT * FROM stickers WHERE day = ? AND ${visibleTo()} ORDER BY created_at`, day, user.id)).map(stickerOut);
+  const reacts = await reactionsFor('note', 'SELECT id FROM notes WHERE day = ?', [day], user.id);
+  for (const n of notes) n.reactions = reacts[n.id] || {};
   return {
     day, today: today(), archived: day !== today(), quote: quoteFor(day),
     notes: notes.map((n) => forViewer(n, user.id)),
@@ -781,7 +806,12 @@ route('GET', /^\/api\/notes\/([\w-]+)$/, async ({ user, params }) => {
   const r = (await dbGet(`${NOTE_SQL} WHERE n.id = ? AND ${visibleTo('n.')}`, params[0], user.id));
   if (!r) throw new HttpError(404, 'This note is no longer on the board.');
   const replies = (await dbAll(`${REPLY_SQL} WHERE r.note_id = ? AND ${visibleTo('r.')} ORDER BY r.created_at`, params[0], user.id)).map(replyOut);
-  return { note: forViewer(noteOut(r), user.id), replies: replies.map((x) => forViewer(x, user.id)), archived: r.day !== today() };
+  const noteReacts = await reactionsFor('note', '?', [params[0]], user.id);
+  const replyReacts = await reactionsFor('reply', 'SELECT id FROM replies WHERE note_id = ?', [params[0]], user.id);
+  for (const x of replies) x.reactions = replyReacts[x.id] || {};
+  const note = noteOut(r);
+  note.reactions = noteReacts[r.id] || {};
+  return { note: forViewer(note, user.id), replies: replies.map((x) => forViewer(x, user.id)), archived: r.day !== today() };
 });
 
 route('POST', /^\/api\/notes\/([\w-]+)\/replies$/, async ({ req, user, params }) => {
@@ -790,19 +820,48 @@ route('POST', /^\/api\/notes\/([\w-]+)\/replies$/, async ({ req, user, params })
   if (!note || (note.hidden === PENDING && note.user_id !== user.id)) throw new HttpError(404, 'This note is no longer on the board.');
   if (note.hidden === PENDING) throw new HttpError(403, 'Replies open once this note is approved.');
   requireToday(note.day);
-  const text = cleanText((await readJson(req)).text);
+  const body = await readJson(req);
+  const text = cleanText(body.text);
+  let parentId = null;
+  if (body.parentId) {
+    const parent = await dbGet('SELECT id, parent_id FROM replies WHERE id = ? AND note_id = ? AND hidden = 0', String(body.parentId), note.id);
+    if (!parent) throw new HttpError(404, 'That reply is no longer here.');
+    parentId = parent.parent_id || parent.id; // one level of threading keeps conversations easy to follow
+  }
   const { support, hold } = (await moderate(text, user));
   rateLimit(`reply:${user.id}`, 10, 60_000);
   const id = randomUUID();
-  (await dbRun('INSERT INTO replies (id, note_id, user_id, text, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, note.id, user.id, text, hold ? PENDING : 0, now()));
+  (await dbRun('INSERT INTO replies (id, note_id, user_id, text, hidden, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', id, note.id, user.id, text, hold ? PENDING : 0, parentId, now()));
   const reply = replyOut((await dbGet(`${REPLY_SQL} WHERE r.id = ?`, id)));
   emit('reply', { ...reply, day: note.day }, { hidden: hold ? PENDING : 0, user_id: user.id });
   if (!hold) broadcast('note', (await getNote(note.id))); // refresh reply count
   return { reply: forViewer(reply, user.id), support, pending: hold };
 });
 
+route('POST', /^\/api\/react$/, async ({ req, user }) => {
+  requirePoster(user);
+  const { type, id, emoji } = await readJson(req, 1024);
+  if (!['note', 'reply'].includes(type) || !REACTIONS.includes(emoji)) throw new HttpError(400, 'Unknown reaction.');
+  const row = await dbGet(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden = 0`, String(id));
+  if (!row) throw new HttpError(404, 'That is no longer on the board.');
+  const day = await dayOf(type, row);
+  requireToday(day);
+  rateLimit(`react:${user.id}`, 90, 60_000, 'Lots of reactions! Give it a moment.');
+  const had = await dbGet('SELECT 1 AS x FROM reactions WHERE target_type = ? AND target_id = ? AND user_id = ? AND emoji = ?', type, row.id, user.id, emoji);
+  if (had) await dbRun('DELETE FROM reactions WHERE target_type = ? AND target_id = ? AND user_id = ? AND emoji = ?', type, row.id, user.id, emoji);
+  else await dbRun('INSERT INTO reactions (target_type, target_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)', type, row.id, user.id, emoji, now());
+  const counts = {};
+  for (const r of await dbAll('SELECT emoji, COUNT(*) AS n FROM reactions WHERE target_type = ? AND target_id = ? GROUP BY emoji', type, row.id)) counts[r.emoji] = r.n;
+  broadcast('reactions', { type, id: row.id, noteId: type === 'reply' ? row.note_id : row.id, day, counts });
+  return { counts, mine: !had };
+});
+
 // A squiggly line: points relative to its top-left corner, plus colour and thickness.
 const LINE_COLORS = ['#161513', '#8f3f1c', '#c2410c', '#ca8a04', '#3f7d3a', '#0f766e', '#2b6cb0', '#6d65d8', '#be185d', '#ffffff'];
+const BRUSHES = ['pen', 'pencil', 'crayon', 'highlighter', 'paint'];
+// Word tiles remember the look they were placed with.
+const TILE_STYLES = ['clipping', 'magnet', 'plain', 'pixel', 'funky', 'alien', 'doodle'];
+const TILE_FONTS = ['auto', 'oldprint', 'typewriter', 'boldserif', 'classic', 'rounded', 'pixel', 'funky', 'block', 'space', 'hand', 'script', 'clean'];
 function cleanLine(raw) {
   const pts = Array.isArray(raw?.p) ? raw.p : [];
   if (pts.length < 2 || pts.length > 600) throw new HttpError(400, 'That line is too short or too long.');
@@ -811,8 +870,9 @@ function cleanLine(raw) {
     return [Math.round(clamp(pt[0], 0, 3000)), Math.round(clamp(pt[1], 0, 3000))];
   });
   const c = LINE_COLORS.includes(raw.c) ? raw.c : LINE_COLORS[0];
-  const w = Math.round(clamp(raw.w, 2, 14));
-  return JSON.stringify({ p, c, w });
+  const b = BRUSHES.includes(raw.b) ? raw.b : 'pen';
+  const w = Math.round(clamp(raw.w, 1, b === 'highlighter' ? 32 : 18));
+  return JSON.stringify({ p, c, w, b });
 }
 
 route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
@@ -820,6 +880,7 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   const body = await readJson(req, 200 * 1024);
   let kind;
   let content;
+  let screen = null;
   if (body.kind === 'line') {
     rateLimit(`line:${user.id}`, 30, 60_000, 'Lots of drawing! Give it a moment.');
     content = cleanLine(body.content);
@@ -832,31 +893,36 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
       if (!verdict.ok) throw new HttpError(422, verdict.reason, { moderation: true });
     }
     kind = 'word';
-    content = word;
+    content = JSON.stringify({
+      t: word, s: TILE_STYLES.includes(body.style) ? body.style : 'clipping', f: TILE_FONTS.includes(body.font) ? body.font : 'auto',
+    });
   } else {
     rateLimit(`sticker:${user.id}`, 15, 60_000, 'That’s a lot of stickers! Give it a moment.');
-    if (body.kind === 'doodle' && DOODLES.includes(body.content)) {
+    // a doodle is "name" (paper sticker) or "name:magnet" (glossy fridge magnet)
+    const [doodleName, doodleStyle] = String(body.content || '').split(':');
+    if (body.kind === 'doodle' && DOODLES.includes(doodleName) && (!doodleStyle || doodleStyle === 'magnet')) {
       kind = 'doodle';
-      content = body.content;
+      content = doodleStyle ? `${doodleName}:magnet` : doodleName;
     } else if (body.kind === 'emoji' && typeof body.content === 'string' && [...body.content].length <= 4 && !/[\p{L}\p{N}<>]/u.test(body.content)) {
       kind = 'emoji';
       content = body.content;
-    } else if (body.kind === 'image' && typeof body.mine === 'string') {
+    } else if ((body.kind === 'image' || body.kind === 'magnet') && typeof body.mine === 'string') {
       const mine = (await dbGet('SELECT * FROM my_stickers WHERE id = ? AND user_id = ?', body.mine, user.id));
       if (!mine) throw new HttpError(404, 'Sticker not found in your collection.');
-      kind = 'image';
+      kind = body.kind; // 'magnet' = their drawing in a glossy fridge-magnet frame
       content = mine.data;
+      screen = mine.screen;
     } else {
       throw new HttpError(400, 'Unknown sticker.');
     }
   }
   const id = randomUUID();
   const size = kind === 'word' || kind === 'line' ? 0 : clamp(body.size || 72, 40, 160);
-  const hidden = kind === 'image' ? PENDING : 0;
-  (await dbRun('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, now(),));
+  const hidden = kind === 'image' || kind === 'magnet' ? PENDING : 0; // hand-made pictures always get a human look
+  (await dbRun('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, screen, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, screen, now()));
   const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', id)));
   emit('sticker', sticker, { hidden, user_id: user.id });
-  return { sticker: forViewer(sticker, user.id), pending: hidden === PENDING ? 'it\u2019s a hand-made sticker' : null };
+  return { sticker: forViewer(sticker, user.id), pending: hidden === PENDING ? 'it\u2019s hand-made' : null };
 });
 
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
@@ -886,6 +952,27 @@ route('GET', /^\/api\/my-stickers$/, async ({ user }) => {
   requireUser(user);
   return { stickers: (await dbAll('SELECT id, data FROM my_stickers WHERE user_id = ? ORDER BY created_at DESC', user.id)) };
 });
+// Automatic image check for hand-made stickers (optional). Google Cloud Vision's SafeSearch rates how
+// likely an image is to be adult, violent, racy or gory. Clearly inappropriate images are refused;
+// everything else still waits for a moderator, labelled with the result. Returns 'safe' | 'unsure' | null.
+const RISKY = new Set(['LIKELY', 'VERY_LIKELY']);
+async function screenImage(dataUrl) {
+  if (!CONFIG.visionKey) return null; // not configured: a human still reviews every hand-made sticker
+  try {
+    const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(CONFIG.visionKey)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requests: [{ image: { content: dataUrl.split(',')[1] }, features: [{ type: 'SAFE_SEARCH_DETECTION' }] }] }),
+    });
+    const ss = (await res.json()).responses?.[0]?.safeSearchAnnotation;
+    if (!ss) return 'unsure';
+    if (RISKY.has(ss.adult) || RISKY.has(ss.violence) || RISKY.has(ss.racy)) return 'blocked';
+    return ss.adult === 'POSSIBLE' || ss.violence === 'POSSIBLE' || ss.racy === 'POSSIBLE' ? 'unsure' : 'safe';
+  } catch {
+    return 'unsure';
+  }
+}
+
 route('POST', /^\/api\/my-stickers$/, async ({ req, user }) => {
   requirePoster(user);
   const { data } = await readJson(req, 220 * 1024);
@@ -893,8 +980,10 @@ route('POST', /^\/api\/my-stickers$/, async ({ req, user }) => {
   const count = (await dbGet('SELECT COUNT(*) AS c FROM my_stickers WHERE user_id = ?', user.id)).c;
   if (count >= 40) throw new HttpError(400, 'Your collection is full (40 stickers). Remove one to add another.');
   rateLimit(`mysticker:${user.id}`, 10, 600_000);
+  const screen = await screenImage(data);
+  if (screen === 'blocked') throw new HttpError(422, 'This image can\u2019t be used on Kindboard. Try drawing something else?', { moderation: true });
   const id = randomUUID();
-  (await dbRun('INSERT INTO my_stickers (id, user_id, data, created_at) VALUES (?, ?, ?, ?)', id, user.id, data, now()));
+  (await dbRun('INSERT INTO my_stickers (id, user_id, data, screen, created_at) VALUES (?, ?, ?, ?, ?)', id, user.id, data, screen, now()));
   return { sticker: { id, data } };
 });
 route('DELETE', /^\/api\/my-stickers\/([\w-]+)$/, async ({ user, params }) => {
@@ -938,6 +1027,7 @@ async function adminItem(type, id, flagInfo) {
   if (!row) return null;
   return {
     type, id, flags: flagInfo?.c || 0, reasons: flagInfo ? flagInfo.reasons.split(',') : [], when: flagInfo?.last || row.created_at,
+    screen: row.screen ?? null,
     text: row.text ?? null, kind: row.kind ?? null, content: row.content ?? null, day: (await dayOf(type, row)), why: row.text ? checkText(row.text).hold : null,
     hidden: row.hidden, pending: row.hidden === PENDING, struck: !!row.struck, author: row.handle, authorStrikes: row.strikes, authorBanned: !!row.banned,
   };

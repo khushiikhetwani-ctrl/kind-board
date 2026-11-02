@@ -27,13 +27,18 @@ async function load() {
       const status = it.pending ? 'waiting for approval' : it.hidden === 1 ? 'removed' : it.hidden === 2 ? 'deleted by author' : 'visible';
       const tags = [[it.type, false], [it.day, false], [status, it.pending || it.hidden === 1]];
       if (it.why) tags.push([`held because ${it.why}`, false]);
-      if (it.kind === 'image') tags.push(['hand-made sticker', false]);
+      if (it.kind === 'image' || it.kind === 'magnet') {
+        tags.push([it.kind === 'magnet' ? 'hand-made magnet' : 'hand-made sticker', false]);
+        tags.push([it.screen === 'safe' ? 'auto-check: looks safe' : it.screen === 'unsure' ? 'auto-check: unsure, look closely' : 'not auto-checked', it.screen === 'unsure']);
+      }
       if (it.flags) tags.push([`${it.flags} report${it.flags === 1 ? '' : 's'}: ${it.reasons.join(', ')}`, true]);
       tags.push([`by ${it.author} · ${it.authorStrikes} strike(s)${it.authorBanned ? ' · paused' : ''}`, it.authorBanned]);
       for (const [t, bad] of tags) meta.append(el('span', `tag${bad ? ' bad' : ''}`, t));
       let body;
       if (it.text != null) body = el('p', 'mod-text', it.text);
-      else if (it.kind === 'emoji' || it.kind === 'word') body = el('div', 'mod-emoji', it.content);
+      else if (it.kind === 'emoji') body = el('div', 'mod-emoji', it.content);
+      else if (it.kind === 'line') body = el('div', 'mod-emoji', 'a drawn line');
+      else if (it.kind === 'word') body = el('div', 'mod-emoji', it.content.startsWith('{') ? JSON.parse(it.content).t : it.content);
       else { body = el('img', 'mod-img'); body.src = it.content; body.alt = 'Flagged sticker'; }
       const actions = el('div', 'mod-actions');
       const act = (label, action, cls = '') => {

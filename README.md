@@ -85,6 +85,14 @@ People can sign in with Google instead of a password. Kindboard asks Google only
 
 The "Continue with Google" button appears automatically once these are set.
 
+## Automatic image check for hand-made stickers (optional)
+
+Every hand-made sticker or magnet waits for a moderator. Add a free Google Cloud Vision key and each picture is also screened when it's saved: clearly sexual, violent or gory images are refused straight away, and the rest arrive in `/admin` labelled *looks safe* or *unsure*.
+
+1. In **console.cloud.google.com**, enable the **Cloud Vision API** for your project (the free tier covers about 1,000 images a month).
+2. **Credentials → Create credentials → API key**; restrict it to the Cloud Vision API.
+3. In Render, add `GOOGLE_VISION_API_KEY` with that key.
+
 ## Free hosting that keeps its data (Render free + Turso free)
 
 Render's free plan wipes its disk whenever the site sleeps or restarts, so keep the data in a free hosted database instead:

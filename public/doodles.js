@@ -18,17 +18,22 @@ export const DOODLES = {
 };
 
 const NS = 'http://www.w3.org/2000/svg';
-export function doodleEl(name) {
+/** A doodle as a paper sticker ("heart") or a glossy fridge magnet ("heart:magnet"). */
+export function doodleEl(content) {
+  const [name, style] = String(content).split(':');
+  const magnet = style === 'magnet';
   const [stroke, tint, inner] = DOODLES[name] || DOODLES.heart;
   const wrap = document.createElement('span');
-  wrap.className = 'doodle';
+  wrap.className = magnet ? 'doodle magnet' : 'doodle';
   wrap.style.setProperty('--tint', tint);
+  wrap.style.setProperty('--dink', stroke);
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 64 64');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', stroke);
-  svg.setAttribute('stroke-width', '2.6');
+  // magnets are moulded plastic in the doodle's colour, with the design raised in white
+  svg.setAttribute('stroke', magnet ? '#ffffff' : stroke);
+  svg.setAttribute('stroke-width', magnet ? '3.4' : '2.6');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
   // Static, trusted artwork from this file only, never user content.

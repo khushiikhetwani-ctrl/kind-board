@@ -21,6 +21,22 @@
   <!-- line icons -->
   <svg width="0" height="0" class="sprite" aria-hidden="true">
     <defs>
+      <filter id="f-pencil" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
+        <feTurbulence type="fractalNoise" baseFrequency="1.8" numOctaves="2" seed="3" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" result="d"/>
+        <feComposite in="d" in2="n" operator="in"/>
+      </filter>
+      <filter id="f-crayon" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
+        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" seed="7" result="noise"/>
+        <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2.4 1.75" result="grain"/>
+        <feComposite in="SourceGraphic" in2="grain" operator="in" result="waxy"/>
+        <feDisplacementMap in="waxy" in2="noise" scale="3"/>
+      </filter>
+      <filter id="f-paint" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
+        <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="2" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="6" result="d"/>
+        <feGaussianBlur in="d" stdDeviation="0.7"/>
+      </filter>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
@@ -269,6 +285,14 @@
     </aside>
 
     <div id="penBar" class="pen-bar" hidden role="toolbar" aria-label="Drawing">
+      <div class="pen-brushes" role="radiogroup" aria-label="Brush">
+        <button class="pen-brush" data-brush="pen" role="radio" aria-checked="true">Pen</button>
+        <button class="pen-brush" data-brush="pencil" role="radio" aria-checked="false">Pencil</button>
+        <button class="pen-brush" data-brush="crayon" role="radio" aria-checked="false">Crayon</button>
+        <button class="pen-brush" data-brush="highlighter" role="radio" aria-checked="false">Highlighter</button>
+        <button class="pen-brush" data-brush="paint" role="radio" aria-checked="false">Paint</button>
+      </div>
+      <span class="dock-sep"></span>
       <div class="pen-colors" role="radiogroup" aria-label="Line color"></div>
       <span class="dock-sep"></span>
       <div class="pen-sizes" role="radiogroup" aria-label="Line thickness">
@@ -292,6 +316,10 @@
       </div>
 
       <div data-panel="words">
+        <div class="word-looks">
+          <div class="word-styles" id="wordStyles" role="radiogroup" aria-label="Tile style"></div>
+          <label class="word-font"><span class="label">Font</span><select id="wordFont" aria-label="Tile font"></select></label>
+        </div>
         <p class="tray-hint">Tap a word, then tap the board. Keep tapping words to continue your sentence.</p>
         <div class="word-bank" id="wordBank"></div>
         <div class="word-bank glue" id="glueBank"></div>
@@ -305,11 +333,19 @@
         </div>
       </div>
       <div data-panel="stickers" hidden>
+        <div class="doodle-styles" role="radiogroup" aria-label="Sticker or magnet">
+          <button class="look-chip" data-doodle-style="sticker" role="radio" aria-checked="true">Sticker</button>
+          <button class="look-chip" data-doodle-style="magnet" role="radio" aria-checked="false">Fridge magnet</button>
+        </div>
         <p class="tray-hint">Pick one, then tap the board to stick it down.</p>
         <div class="sticker-grid" id="doodleGrid"></div>
       </div>
       <div data-panel="mine" hidden>
-        <p class="tray-hint">Draw your own, or turn a photo into a sticker. Only you can use these.</p>
+        <div class="doodle-styles" role="radiogroup" aria-label="Sticker or magnet">
+          <button class="look-chip" data-doodle-style="sticker" role="radio" aria-checked="true">Sticker</button>
+          <button class="look-chip" data-doodle-style="magnet" role="radio" aria-checked="false">Fridge magnet</button>
+        </div>
+        <p class="tray-hint">Draw your own, or turn a photo into a sticker or magnet. Only you can use these, and each one gets a quick check before others see it.</p>
         <div class="sticker-grid" id="mineGrid"></div>
       </div>
     </section>
@@ -329,6 +365,7 @@
         <ol class="reply-list"></ol>
       </div>
       <form class="reply-form" id="replyForm">
+        <div class="reply-to-chip" id="replyToChip" hidden><span>Replying to <b id="replyToName"></b></span><button type="button" class="icon-btn" id="replyToCancel" aria-label="Stop replying to this person"><svg class="i"><use href="#i-x"/></svg></button></div>
         <textarea id="replyText" rows="2" placeholder="Write back with kindness…" aria-label="Your reply"></textarea>
         <p class="form-error" hidden></p>
         <div class="reply-row">
