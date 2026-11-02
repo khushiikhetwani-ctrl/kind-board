@@ -398,6 +398,16 @@ const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar, u.look FROM replies 
 
 // ---- emoji reactions: a small, kind set
 const REACTIONS = ['\u{1F49B}', '\u{1F917}', '\u{1FAF6}', '\u{1F60A}', '\u{1F64F}', '\u{1F331}']; // 💛 🤗 🫶 😊 🙏 🌱
+// Any emoji can be a reaction, except a few that are mostly used to mock or hurt.
+const BLOCKED_REACTIONS = new Set([...'🖕💩🔪🗡⚔🔫💣🤡🤮🤢💀☠🪓🩸🍆🍑💦👅😈👿🤬😡😠🙄🥱😒🤥🫵👎🗯👹👺🔞💢'].filter((ch) => ch.trim()));
+const EMOJI_RE = /^(?:\p{Regional_Indicator}{2}|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*)$/u;
+function reactionProblem(emoji) {
+  const e = String(emoji || '');
+  if (!e || e.length > 24 || !EMOJI_RE.test(e)) return 'That isn\u2019t a single emoji.';
+  const bare = e.replace(/[\uFE0F\u{1F3FB}-\u{1F3FF}]/gu, ''); // ignore variation selectors and skin tones
+  for (const ch of bare.split('\u200D')) if (BLOCKED_REACTIONS.has(ch)) return 'Let\u2019s keep reactions kind. Try another one?';
+  return null;
+}
 // { targetId: { emoji: { n, mine } } } for a set of notes or replies
 async function reactionsFor(type, idsSql, args, viewerId) {
   const rows = await dbAll(`SELECT target_id, emoji, COUNT(*) AS n, SUM(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS mine
@@ -860,13 +870,19 @@ route('POST', /^\/api\/notes\/([\w-]+)\/replies$/, async ({ req, user, params })
 route('POST', /^\/api\/react$/, async ({ req, user }) => {
   requirePoster(user);
   const { type, id, emoji } = await readJson(req, 1024);
-  if (!['note', 'reply'].includes(type) || !REACTIONS.includes(emoji)) throw new HttpError(400, 'Unknown reaction.');
+  if (!['note', 'reply'].includes(type)) throw new HttpError(400, 'Unknown item.');
+  const problem = reactionProblem(emoji);
+  if (problem) throw new HttpError(400, problem);
   const row = await dbGet(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden = 0`, String(id));
   if (!row) throw new HttpError(404, 'That is no longer on the board.');
   const day = await dayOf(type, row);
   requireToday(day);
   rateLimit(`react:${user.id}`, 90, 60_000, 'Lots of reactions! Give it a moment.');
   const had = await dbGet('SELECT 1 AS x FROM reactions WHERE target_type = ? AND target_id = ? AND user_id = ? AND emoji = ?', type, row.id, user.id, emoji);
+  if (!had) {
+    const mine = await dbGet('SELECT COUNT(*) AS n FROM reactions WHERE target_type = ? AND target_id = ? AND user_id = ?', type, row.id, user.id);
+    if (mine.n >= 8) throw new HttpError(429, 'That\u2019s plenty of reactions for one post.');
+  }
   if (had) await dbRun('DELETE FROM reactions WHERE target_type = ? AND target_id = ? AND user_id = ? AND emoji = ?', type, row.id, user.id, emoji);
   else await dbRun('INSERT INTO reactions (target_type, target_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?, ?)', type, row.id, user.id, emoji, now());
   const counts = {};

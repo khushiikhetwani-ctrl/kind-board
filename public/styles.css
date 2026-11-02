@@ -1078,3 +1078,20 @@ body.pat-cursor, body.pat-cursor * {
 /* notes whose writer asked for no doodles on top */
 .note.keep-clear .note-foot::after { content: 'kept clear'; font: 500 10.5px var(--mono); letter-spacing: 0.04em; color: var(--note-ink-2); border: 1px dashed color-mix(in srgb, var(--note-ink) 30%, transparent); border-radius: 999px; padding: 1px 7px; margin-left: 8px; white-space: nowrap; }
 .note.keep-clear .note-foot .replies { white-space: nowrap; }
+
+/* full emoji picker */
+.emoji-picker { width: min(340px, calc(100vw - 24px)); display: grid; gap: 8px; padding: 4px; }
+.emoji-picker .react-pick { border-bottom: 1px solid var(--line); padding-bottom: 8px; justify-content: space-between; }
+.emoji-tabs { display: flex; gap: 2px; justify-content: space-between; }
+.emoji-tab { width: 34px; height: 32px; border: 0; border-radius: 10px; background: transparent; font-size: 18px; opacity: 0.55; transition: opacity 0.2s, background 0.2s; }
+.emoji-tab:hover { opacity: 1; }
+.emoji-tab[aria-selected="true"] { opacity: 1; background: var(--field); }
+.emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 220px; overflow-y: auto; }
+#menu .emoji-grid .react-opt { width: 100%; height: 38px; min-width: 0; padding: 0; display: grid; place-items: center; font-size: 22px; }
+.emoji-own { display: flex; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.emoji-own .field { flex: 1; }
+#menu:has(.emoji-picker) { min-width: 0; padding: 6px; }
+#menu .emoji-picker button { min-width: 0; width: auto; padding: 0; justify-content: center; }
+#menu .emoji-picker .emoji-tab { width: 34px; }
+#menu .emoji-picker .emoji-own .btn { padding: 0 12px; }
+#menu .emoji-picker .react-pick .react-opt { width: 42px; }

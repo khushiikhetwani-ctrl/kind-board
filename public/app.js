@@ -2,6 +2,7 @@
 // Flow: hello → what this is → kind rules → log in → calendar → a day's board.
 
 import { DOODLES, doodleEl } from './doodles.js';
+import { EMOJI_GROUPS } from './emoji.js';
 import { startGarden, drawCharacter, characterPortrait, LOOKS, HAIRSTYLES, randomLook, WEATHERS } from './garden.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1788,7 +1789,10 @@ function paintReactBar(bar) {
   const [type, id] = bar.dataset.react.split(':');
   const data = S.reacts.get(bar.dataset.react) || {};
   const can = canPost() && !S.notes.get(type === 'note' ? id : S.openNote)?.pending;
-  const chips = (S.cfg.reactions || []).filter((e) => data[e]?.n > 0).map((e) => {
+  const fav = S.cfg.reactions || [];
+  const used = Object.keys(data).filter((e) => data[e]?.n > 0)
+    .sort((x, y) => (fav.indexOf(x) + 1 || 99) - (fav.indexOf(y) + 1 || 99) || data[y].n - data[x].n); // favourites first, then most used
+  const chips = used.map((e) => {
     const b = h('button', { type: 'button', class: `react-chip${data[e].mine ? ' mine' : ''}`, 'aria-pressed': String(!!data[e].mine), 'aria-label': `${e} ${data[e].n}`, disabled: !can }, e, h('span', { text: String(data[e].n) }));
     b.onclick = () => toggleReaction(type, id, e);
     return b;
@@ -1796,18 +1800,44 @@ function paintReactBar(bar) {
   const add = h('button', { type: 'button', class: 'react-add', 'aria-label': 'Add a reaction', disabled: !can, title: 'React' }, '\u{1F642}', h('span', { text: '+' }));
   add.onclick = (ev) => {
     ev.stopPropagation();
-    const r = ev.currentTarget.getBoundingClientRect();
-    const pick = $('#menu');
-    pick.replaceChildren(h('div', { class: 'react-pick' }, ...(S.cfg.reactions || []).map((e) => h('button', { type: 'button', class: 'react-opt', text: e, 'aria-label': `React ${e}`, onclick: () => { hidePopovers(); toggleReaction(type, id, e); } }))));
-    pick.hidden = false;
-    pick.style.left = `${Math.max(12, Math.min(r.left, innerWidth - 260))}px`;
-    pick.style.top = `${Math.min(innerHeight - 64, r.bottom + 6)}px`; // below the button, so it never covers the text
+    openEmojiPicker(ev.currentTarget, (e) => toggleReaction(type, id, e));
   };
   bar.replaceChildren(...chips, ...(can ? [add] : []));
 }
+// The full picker: the six favourites first, then everything by category, plus "type any emoji".
+let pickerGroup = 0;
+function openEmojiPicker(anchor, onPick) {
+  const pick = $('#menu');
+  const choose = (e) => { hidePopovers(); onPick(e); };
+  const emojiBtn = (e) => h('button', { type: 'button', class: 'react-opt', text: e, 'aria-label': `React ${e}`, onclick: () => choose(e) });
+  const grid = h('div', { class: 'emoji-grid' });
+  const tabs = h('div', { class: 'emoji-tabs', role: 'tablist' });
+  const showGroup = (i) => {
+    pickerGroup = i;
+    grid.replaceChildren(...EMOJI_GROUPS[i].emoji.map(emojiBtn));
+    grid.scrollTop = 0;
+    for (const [j, t] of [...tabs.children].entries()) t.setAttribute('aria-selected', String(j === i));
+  };
+  tabs.append(...EMOJI_GROUPS.map((g, i) => h('button', { type: 'button', role: 'tab', class: 'emoji-tab', text: g.icon, title: g.name, 'aria-label': g.name, onclick: (e) => { e.stopPropagation(); showGroup(i); } })));
+  const own = h('input', { class: 'field sm', placeholder: 'Or type any emoji', maxlength: '24', 'aria-label': 'Type any emoji' });
+  const ownForm = h('form', { class: 'emoji-own' }, own, h('button', { type: 'submit', class: 'btn sm subtle', text: 'Add' }));
+  ownForm.addEventListener('submit', (e) => { e.preventDefault(); const v = own.value.trim(); if (v) choose(v); });
+  pick.replaceChildren(h('div', { class: 'emoji-picker' },
+    h('div', { class: 'react-pick' }, ...(S.cfg.reactions || []).map(emojiBtn)),
+    tabs, grid, ownForm));
+  showGroup(pickerGroup);
+  pick.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = Math.min(340, innerWidth - 24);
+  pick.style.left = `${Math.max(12, Math.min(r.left, innerWidth - w - 12))}px`;
+  const below = r.bottom + 6;
+  pick.style.top = `${below + 380 > innerHeight ? Math.max(12, r.top - 386) : below}px`;
+}
+
 async function toggleReaction(type, id, emoji) {
   const key = reactKey(type, id);
-  const data = { ...(S.reacts.get(key) || {}) };
+  const before = S.reacts.get(key) || {};
+  const data = { ...before };
   const was = data[emoji]?.mine;
   data[emoji] = { n: Math.max(0, (data[emoji]?.n || 0) + (was ? -1 : 1)), mine: !was }; // feels instant
   setReactions(type, id, data);
@@ -1817,6 +1847,7 @@ async function toggleReaction(type, id, emoji) {
     for (const [e, n] of Object.entries(res.counts)) fresh[e] = { n, mine: e === emoji ? res.mine : !!S.reacts.get(key)?.[e]?.mine };
     setReactions(type, id, fresh);
   } catch (err) {
+    setReactions(type, id, before); // the server said no: undo the instant update
     toast(err.message);
   }
 }
