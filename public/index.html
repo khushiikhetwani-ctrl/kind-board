@@ -21,22 +21,6 @@
   <!-- line icons -->
   <svg width="0" height="0" class="sprite" aria-hidden="true">
     <defs>
-      <filter id="f-pencil" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
-        <feTurbulence type="fractalNoise" baseFrequency="1.8" numOctaves="2" seed="3" result="n"/>
-        <feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" result="d"/>
-        <feComposite in="d" in2="n" operator="in"/>
-      </filter>
-      <filter id="f-crayon" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
-        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" seed="7" result="noise"/>
-        <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2.4 1.75" result="grain"/>
-        <feComposite in="SourceGraphic" in2="grain" operator="in" result="waxy"/>
-        <feDisplacementMap in="waxy" in2="noise" scale="3"/>
-      </filter>
-      <filter id="f-paint" filterUnits="userSpaceOnUse" x="-50" y="-50" width="4000" height="4000">
-        <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="2" result="n"/>
-        <feDisplacementMap in="SourceGraphic" in2="n" scale="6" result="d"/>
-        <feGaussianBlur in="d" stdDeviation="0.7"/>
-      </filter>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
@@ -406,6 +390,11 @@
           <button type="button" class="opt" data-paper="plain" aria-checked="true" role="radio"><i class="pv plain"></i>Plain</button>
           <button type="button" class="opt" data-paper="lined" aria-checked="false" role="radio"><i class="pv lined"></i>Lined</button>
           <button type="button" class="opt" data-paper="grid" aria-checked="false" role="radio"><i class="pv grid"></i>Grid</button>
+        </div>
+        <div class="opt-group" role="radiogroup" aria-label="Doodles on my note">
+          <span class="label">Doodles</span>
+          <button type="button" class="opt" data-clear="0" aria-checked="true" role="radio">Welcome</button>
+          <button type="button" class="opt" data-clear="1" aria-checked="false" role="radio">Keep my note clear</button>
         </div>
         <div class="opt-group" role="radiogroup" aria-label="Hold it up with">
           <span class="label">Hold with</span>

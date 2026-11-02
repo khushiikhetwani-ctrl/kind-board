@@ -937,11 +937,6 @@ body.pat-cursor, body.pat-cursor * {
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
 /* ============================================================ brushes */
-.line-ink.brush-pencil { opacity: 0.85; }
-.line-ink.brush-crayon { opacity: 0.95; }
-.line-ink.brush-highlighter { opacity: 0.38; stroke-linecap: butt; }
-.line-ink.brush-paint { opacity: 0.8; }
-.line-ink.paint-bloom { opacity: 0.2; }
 .brush-svg-highlighter { mix-blend-mode: multiply; }
 :root[data-theme="dark"] .brush-svg-highlighter { mix-blend-mode: screen; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .brush-svg-highlighter { mix-blend-mode: screen; } }
@@ -1074,3 +1069,12 @@ body.pat-cursor, body.pat-cursor * {
 /* pixel-character avatars */
 .avatar.has-px { background: color-mix(in srgb, var(--av) 28%, #fffaf2); overflow: hidden; padding: 0; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--av) 45%, transparent); }
 .avatar.has-px img { width: 100%; height: 100%; image-rendering: pixelated; display: block; transform: scale(1.22) translateY(5%); }
+
+/* the emoji picker: six compact emoji in a row (not full-width menu rows) */
+#menu .react-pick { display: flex; gap: 2px; }
+#menu .react-pick .react-opt { width: 42px; min-width: 0; height: 42px; padding: 0; display: grid; place-items: center; font-size: 22px; }
+#menu:has(.react-pick) { width: auto; }
+
+/* notes whose writer asked for no doodles on top */
+.note.keep-clear .note-foot::after { content: 'kept clear'; font: 500 10.5px var(--mono); letter-spacing: 0.04em; color: var(--note-ink-2); border: 1px dashed color-mix(in srgb, var(--note-ink) 30%, transparent); border-radius: 999px; padding: 1px 7px; margin-left: 8px; white-space: nowrap; }
+.note.keep-clear .note-foot .replies { white-space: nowrap; }

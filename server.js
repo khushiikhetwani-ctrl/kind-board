@@ -116,6 +116,7 @@ async function setupDatabase() {
   const cols = new Set((await dbAll('PRAGMA table_info(notes)')).map((c) => c.name));
   if (!cols.has('paper')) await dbRun("ALTER TABLE notes ADD COLUMN paper TEXT NOT NULL DEFAULT 'plain'");
   if (!cols.has('fastener')) await dbRun("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
+  if (!cols.has('keep_clear')) await dbRun('ALTER TABLE notes ADD COLUMN keep_clear INTEGER NOT NULL DEFAULT 0'); // writer asked: no doodles over it
   const userCols = new Set((await dbAll('PRAGMA table_info(users)')).map((c) => c.name));
   if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
   if (!userCols.has('google_hash')) await dbRun('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
@@ -261,11 +262,23 @@ async function startSession(req, res, userId, remember) {
   (await dbRun('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', sha(token), userId, now(), now() + ttl));
   setSessionCookie(req, res, token, remember);
 }
+// Logins are remembered for a few seconds, so busy moments (live cursors, many people at once)
+// don't each wait on a database round trip. Any change to a person drops their cached entry.
+const sessionCache = new Map(); // token hash -> { user, until }
+const SESSION_CACHE_MS = 15_000;
+function forgetUser(userId) {
+  for (const [k, v] of sessionCache) if (v.user?.id === userId) sessionCache.delete(k);
+}
 async function sessionUser(req) {
   const token = parseCookies(req).kb_session;
   if (!token || token.length > 100) return null;
-  const row = (await dbGet(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`, sha(token), now()));
-  return row || null;
+  const key = sha(token);
+  const hit = sessionCache.get(key);
+  if (hit && hit.until > now()) return hit.user;
+  const row = (await dbGet(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`, key, now())) || null;
+  sessionCache.set(key, { user: row, until: now() + SESSION_CACHE_MS });
+  if (sessionCache.size > 5000) sessionCache.delete(sessionCache.keys().next().value);
+  return row;
 }
 
 const displayName = (u) => `Anonymous ${u.animal}`;
@@ -339,6 +352,7 @@ async function addStrike(userId) {
   const strikes = u.strikes + 1;
   const banned = strikes >= CONFIG.strikesToBan ? 1 : 0;
   (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
+  forgetUser(userId);
   if (banned && !u.banned) {
     if (u.ip_hash) {
       (await dbRun('INSERT OR REPLACE INTO banned_ips (ip_hash, until) VALUES (?, ?)', u.ip_hash, now() + CONFIG.ipBanDays * 86_400_000));
@@ -360,6 +374,7 @@ async function removeStrike(userId) {
   const strikes = Math.max(0, u.strikes - 1);
   const banned = strikes >= CONFIG.strikesToBan ? 1 : 0;
   (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
+  forgetUser(userId);
   if (!banned && u.banned && u.ip_hash) (await dbRun('DELETE FROM banned_ips WHERE ip_hash = ?', u.ip_hash));
   sendTo(userId, 'me', publicMe({ ...u, strikes, banned }));
 }
@@ -393,7 +408,7 @@ async function reactionsFor(type, idsSql, args, viewerId) {
 }
 
 const noteOut = (r) => ({
-  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
+  id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, keepClear: !!r.keep_clear, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
   name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
@@ -452,7 +467,7 @@ function broadcastPresence() {
 }
 setInterval(() => {
   for (const c of clients) c.res.write(': ping\n\n');
-}, 25_000).unref();
+}, 15_000).unref();
 
 // ---------------------------------------------------------------- request plumbing
 
@@ -575,7 +590,7 @@ route('POST', /^\/api\/login$/, async ({ req, res }) => {
 
 route('POST', /^\/api\/logout$/, async ({ req, res }) => {
   const token = parseCookies(req).kb_session;
-  if (token) (await dbRun('DELETE FROM sessions WHERE token_hash = ?', sha(token)));
+  if (token) { (await dbRun('DELETE FROM sessions WHERE token_hash = ?', sha(token))); sessionCache.delete(sha(token)); }
   clearSessionCookie(req, res);
   return { ok: true };
 });
@@ -583,6 +598,7 @@ route('POST', /^\/api\/logout$/, async ({ req, res }) => {
 route('POST', /^\/api\/logout-everywhere$/, async ({ req, res, user }) => {
   requireUser(user);
   (await dbRun('DELETE FROM sessions WHERE user_id = ?', user.id));
+  forgetUser(user.id);
   clearSessionCookie(req, res);
   return { ok: true };
 });
@@ -664,6 +680,7 @@ async function googleCallback(req, res, url) {
   if (pending.mode === 'link') {
     if (owner && owner.id !== pending.userId) return redirect(res, '/calendar?google=taken');
     (await dbRun('UPDATE users SET google_hash = ? WHERE id = ?', gHash, pending.userId));
+    forgetUser(pending.userId);
     return redirect(res, '/calendar?google=linked');
   }
   if (owner) {
@@ -689,6 +706,7 @@ route('DELETE', /^\/api\/me\/google$/, async ({ user }) => {
   requireUser(user);
   if (!user.pass_hash || user.pass_hash === '!') throw new HttpError(400, 'Google is the only way into this identity, so it can\u2019t be removed.');
   (await dbRun('UPDATE users SET google_hash = NULL WHERE id = ?', user.id));
+  forgetUser(user.id);
   return { me: publicMe({ ...user, google_hash: null }) };
 });
 
@@ -697,6 +715,7 @@ route('PUT', /^\/api\/me\/look$/, async ({ req, user }) => {
   rateLimit(`look:${user.id}`, 30, 600_000);
   const look = cleanLook(await readJson(req, 1024));
   (await dbRun('UPDATE users SET look = ? WHERE id = ?', JSON.stringify(look), user.id));
+  forgetUser(user.id);
   return { me: publicMe({ ...user, look: JSON.stringify(look) }) };
 });
 
@@ -758,7 +777,7 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
   const paper = PAPERS.includes(body.paper) ? body.paper : 'plain';
   const fastener = FASTENERS.includes(body.fastener) ? body.fastener : 'pin';
   const id = randomUUID();
-  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, day, user.id, text, color, paper, fastener, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now(),));
+  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, keep_clear, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, day, user.id, text, color, paper, fastener, body.keepClear ? 1 : 0, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now()));
   const note = (await getNote(id));
   emit('note', note, { hidden: hold ? PENDING : 0, user_id: user.id });
   return { note: forViewer(note, user.id), support, pending: hold };
@@ -777,7 +796,7 @@ route('POST', /^\/api\/cursor$/, async ({ req, user }) => {
   requireUser(user);
   const body = await readJson(req, 512);
   if (!isDay(body.day) || body.day > today()) throw new HttpError(400, 'Invalid day.');
-  if (hits(`cursor:${user.id}`, 1000).length >= 12) return { ok: true }; // silently drop floods
+  if (hits(`cursor:${user.id}`, 1000).length >= 8) return { ok: true }; // silently drop floods
   hits(`cursor:${user.id}`, 1000).push(now());
   broadcast('cursor', {
     tag: cursorTag(user.id, body.day), day: body.day, gone: !!body.gone,
@@ -918,6 +937,7 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   }
   const id = randomUUID();
   const size = kind === 'word' || kind === 'line' ? 0 : clamp(body.size || 72, 40, 160);
+  await guardClearNotes(user, today(), stickerBox(kind, content, posX(body.x, 60), posY(body.y, 40), size));
   const hidden = kind === 'image' || kind === 'magnet' ? PENDING : 0; // hand-made pictures always get a human look
   (await dbRun('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, screen, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, screen, now()));
   const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', id)));
@@ -925,11 +945,38 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   return { sticker: forViewer(sticker, user.id), pending: hidden === PENDING ? 'it\u2019s hand-made' : null };
 });
 
+// Some writers ask for their note to stay clear of other people's doodles, stickers and words.
+// A note's footprint is estimated from its size class (matching the board's layout) plus a margin.
+const NOTE_BOX = { s: [220, 230], m: [250, 270], l: [290, 330] };
+const noteSizeOf = (text) => (text.length < 70 ? 's' : text.length < 200 ? 'm' : 'l');
+function stickerBox(kind, content, x, y, size) {
+  if (kind === 'line') {
+    const { p } = JSON.parse(content);
+    return [x, y, x + Math.max(...p.map((q) => q[0])), y + Math.max(...p.map((q) => q[1]))];
+  }
+  if (kind === 'word') {
+    const t = content.startsWith('{') ? JSON.parse(content).t : content;
+    return [x, y, x + t.length * 13 + 24, y + 34];
+  }
+  return [x, y, x + size, y + size];
+}
+async function guardClearNotes(user, day, box) {
+  const notes = await dbAll('SELECT x, y, text, user_id FROM notes WHERE day = ? AND hidden = 0 AND keep_clear = 1 AND user_id != ?', day, user.id);
+  for (const n of notes) {
+    const [w, hgt] = NOTE_BOX[noteSizeOf(n.text)];
+    const pad = 6;
+    if (box[0] < n.x + w + pad && box[2] > n.x - pad && box[1] < n.y + hgt + pad && box[3] > n.y - pad) {
+      throw new HttpError(409, 'That note\u2019s writer asked to keep it clear. Try a spot beside it?', { keepClear: true });
+    }
+  }
+}
+
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
   const row = (await ownedRow('sticker', params[0], user));
   requireToday(row.day);
   const body = await readJson(req);
+  await guardClearNotes(user, row.day, stickerBox(row.kind, row.content, posX(body.x, 60), posY(body.y, 40), row.size));
   (await dbRun('UPDATE stickers SET x = ?, y = ? WHERE id = ?', posX(body.x, 60), posY(body.y, 40), row.id));
   const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', row.id)));
   emit('sticker', sticker, row);

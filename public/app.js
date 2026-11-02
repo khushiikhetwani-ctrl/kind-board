@@ -893,6 +893,25 @@ async function loadBoard(day) {
   fitView(false);
 }
 
+// After a dropped connection: quietly catch up without rebuilding the board or moving the camera.
+async function syncBoard() {
+  if (S.view !== 'board' || !S.day) return;
+  let data;
+  try {
+    data = await api('GET', `/api/board?day=${S.day}`);
+  } catch {
+    return;
+  }
+  if (data.day !== S.day) return;
+  const noteIds = new Set(data.notes.map((n) => n.id));
+  const stickerIds = new Set(data.stickers.map((x) => x.id));
+  for (const id of [...S.notes.keys()]) if (!noteIds.has(id)) removeItem('note', id);
+  for (const id of [...S.stickers.keys()]) if (!stickerIds.has(id)) removeItem('sticker', id);
+  for (const x of data.stickers) upsertSticker(x);
+  for (const n of data.notes) upsertNote(n);
+  updateEmpty();
+}
+
 function renderDayNav() {
   const isToday = S.day === S.cfg.today;
   const narrow = innerWidth < 520;
@@ -975,8 +994,12 @@ function upsertNote(n) {
   el.dataset.color = n.color;
   el.dataset.size = noteSize(n.text);
   el.classList.toggle('pending', !!n.pending);
-  el.style.left = `${n.x}px`;
-  el.style.top = `${n.y}px`;
+  el.classList.toggle('keep-clear', !!n.keepClear);
+  el.title = n.keepClear ? 'The writer asked to keep this note clear of doodles' : '';
+  if (!el.classList.contains('dragging')) { // a note in someone's hand isn't yanked by updates from others
+    el.style.left = `${n.x}px`;
+    el.style.top = `${n.y}px`;
+  }
   el.style.setProperty('--rot', `${n.rot}deg`);
   setAvatar($('.avatar', el), n);
   $('.note-name', el).replaceChildren(displayName(n), ...(n.mine ? [h('span', { class: 'you', text: 'you' })] : []));
@@ -1043,16 +1066,79 @@ function linePath(pts) {
   const last = pts[pts.length - 1];
   return `${d} L${last[0]},${last[1]}`;
 }
-// Each brush is a different texture on the same smooth path.
+// Each brush is a few layered strokes on the same smooth path: no SVG filters, so every
+// browser (Safari and phones included) draws them the same way, and fast.
 const BRUSH_WIDTH = { pen: 1, pencil: 0.3, crayon: 1.4, highlighter: 2.6, paint: 1.5 };
 const brushWidth = (b, w) => Math.max(1.2, Math.round(w * (BRUSH_WIDTH[b] ?? 1) * 10) / 10);
-function inkStyle(path, c, w, b = 'pen') {
-  path.setAttribute('stroke', c);
-  path.setAttribute('stroke-width', w);
-  path.setAttribute('class', `line-ink brush-${b}`);
-  const filter = { pencil: 'url(#f-pencil)', crayon: 'url(#f-crayon)', paint: 'url(#f-paint)' }[b];
-  if (filter) path.setAttribute('filter', filter);
-  else path.removeAttribute('filter');
+// A tiny tile of grain in the line's colour, used as the stroke "paint". Patterns render the
+// same in every browser, unlike SVG filters.
+let patternCount = 0;
+function grain(svg, color, { size = 8, cell = 1, density = 0.7, minO = 0.55, maxO = 1 }) {
+  let defs = svg.querySelector('defs');
+  if (!defs) { defs = document.createElementNS(SVG, 'defs'); svg.prepend(defs); }
+  const pat = document.createElementNS(SVG, 'pattern');
+  const id = `grain-${++patternCount}`;
+  pat.setAttribute('id', id);
+  pat.setAttribute('patternUnits', 'userSpaceOnUse');
+  pat.setAttribute('width', size);
+  pat.setAttribute('height', size);
+  for (let y = 0; y < size; y += cell) {
+    for (let x = 0; x < size; x += cell) {
+      if (Math.random() > density) continue; // a gap where the paper shows through
+      const r = document.createElementNS(SVG, 'rect');
+      r.setAttribute('x', x);
+      r.setAttribute('y', y);
+      r.setAttribute('width', cell);
+      r.setAttribute('height', cell);
+      r.setAttribute('fill', color);
+      r.setAttribute('fill-opacity', (minO + Math.random() * (maxO - minO)).toFixed(2));
+      pat.append(r);
+    }
+  }
+  defs.append(pat);
+  return `url(#${id})`;
+}
+const lighten = (hex, t) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `#${[16, 8, 0].map((sh) => Math.round(((n >> sh) & 255) + (255 - ((n >> sh) & 255)) * t).toString(16).padStart(2, '0')).join('')}`;
+};
+function brushLayers(b, w, c, svg) {
+  switch (b) {
+    case 'pencil': // graphite grain, with a faint second pass beside it like a real sketch
+      return [
+        { w: Math.max(1.4, w), stroke: grain(svg, c, { size: 6, density: 0.62, minO: 0.45, maxO: 0.95 }) },
+        { w: Math.max(0.8, w * 0.6), o: 0.35, dx: 0.7, dy: 0.6, stroke: grain(svg, c, { size: 5, density: 0.5 }) },
+      ];
+    case 'crayon': // waxy colour with little gaps, and rough edges from offset passes
+      return [
+        { w, stroke: grain(svg, c, { size: 8, density: 0.72, minO: 0.6 }) },
+        { w: w * 0.8, dx: w * 0.12, dy: -w * 0.1, stroke: grain(svg, c, { size: 7, density: 0.55, minO: 0.5 }) },
+        { w: w * 0.55, dx: -w * 0.1, dy: w * 0.14, stroke: grain(svg, lighten(c, 0.12), { size: 5, density: 0.45, minO: 0.4 }) },
+      ];
+    case 'paint': // watercolour: a faint wash, a main pass and offset glazes, uneven like real paint
+      return [
+        { w: w * 1.6, o: 0.1 },
+        { w, o: 0.42 },
+        { w: w * 0.85, o: 0.24, dx: 1.4, dy: -0.9 },
+        { w: w * 0.45, o: 0.22, stroke: lighten(c, 0.2), dx: -0.6, dy: 0.5 },
+      ];
+    case 'highlighter':
+      return [{ w, o: 0.38, cap: 'butt' }];
+    default: // pen
+      return [{ w, o: 1 }];
+  }
+}
+function brushPaths(c, w, b, svg) {
+  return brushLayers(b, w, c, svg).map((l) => {
+    const path = document.createElementNS(SVG, 'path');
+    path.setAttribute('class', 'line-ink');
+    path.setAttribute('stroke', l.stroke || c);
+    path.setAttribute('stroke-width', l.w);
+    if (l.o != null) path.setAttribute('stroke-opacity', l.o);
+    if (l.cap) path.setAttribute('stroke-linecap', l.cap);
+    if (l.dx || l.dy) path.setAttribute('transform', `translate(${l.dx || 0} ${l.dy || 0})`);
+    return path;
+  });
 }
 function lineSvg({ p, c, w, b = 'pen' }) {
   const maxX = Math.max(...p.map((pt) => pt[0]));
@@ -1061,25 +1147,17 @@ function lineSvg({ p, c, w, b = 'pen' }) {
   svg.setAttribute('width', maxX + LINE_PAD * 2);
   svg.setAttribute('height', maxY + LINE_PAD * 2);
   svg.setAttribute('viewBox', `${-LINE_PAD} ${-LINE_PAD} ${maxX + LINE_PAD * 2} ${maxY + LINE_PAD * 2}`);
+  svg.setAttribute('class', `brush-svg-${b}`);
   const d = linePath(p);
   const hit = document.createElementNS(SVG, 'path'); // wider invisible stroke, easier to grab
   hit.setAttribute('d', d);
   hit.setAttribute('class', 'line-hit');
-  hit.setAttribute('stroke-width', w + 14);
-  svg.setAttribute('class', `brush-svg-${b}`);
+  hit.setAttribute('stroke-width', w * 1.9 + 14);
   svg.append(hit);
-  if (b === 'paint') {
-    // a soft watery bloom underneath the paint stroke
-    const bloom = document.createElementNS(SVG, 'path');
-    bloom.setAttribute('d', d);
-    inkStyle(bloom, c, w * 1.8, 'paint');
-    bloom.classList.add('paint-bloom');
-    svg.append(bloom);
+  for (const path of brushPaths(c, w, b, svg)) {
+    path.setAttribute('d', d);
+    svg.append(path);
   }
-  const ink = document.createElementNS(SVG, 'path');
-  ink.setAttribute('d', d);
-  inkStyle(ink, c, w, b);
-  svg.append(ink);
   return svg;
 }
 
@@ -1128,11 +1206,10 @@ function penDown(e) {
   const live = document.createElementNS(SVG, 'svg');
   live.setAttribute('class', 'line-live');
   live.classList.add(`brush-svg-${pen.brush}`);
-  const path = document.createElementNS(SVG, 'path');
-  inkStyle(path, pen.color, brushWidth(pen.brush, pen.w), pen.brush);
-  live.append(path);
+  const paths = brushPaths(pen.color, brushWidth(pen.brush, pen.w), pen.brush, live);
+  live.append(...paths);
   stickerLayer.append(live);
-  pen.stroke = { pts: [[p.x, p.y]], live, path };
+  pen.stroke = { pts: [[p.x, p.y]], live, paths };
   viewport.setPointerCapture(e.pointerId);
 }
 function penMove(e) {
@@ -1141,7 +1218,8 @@ function penMove(e) {
   const last = pen.stroke.pts[pen.stroke.pts.length - 1];
   if (Math.hypot(p.x - last[0], p.y - last[1]) < 2.5) return;
   pen.stroke.pts.push([p.x, p.y]);
-  pen.stroke.path.setAttribute('d', linePath(pen.stroke.pts));
+  const d = linePath(pen.stroke.pts);
+  for (const path of pen.stroke.paths) path.setAttribute('d', d);
 }
 async function penUp() {
   const st = pen.stroke;
@@ -1280,16 +1358,23 @@ $('#listClose').onclick = closeList;
 const cursors = new Map();
 const cursorLayer = $('#cursors');
 let lastSent = 0;
+let lastPos = null;
 let pendingCursor = null;
+let cursorInFlight = false;
 function sendCursor(payload) {
   const t = performance.now();
-  if (t - lastSent < 90) {
+  if (!payload.gone && lastPos && Math.hypot(payload.x - lastPos.x, payload.y - lastPos.y) < 4) return;
+  if (cursorInFlight || t - lastSent < 180) {
     clearTimeout(pendingCursor);
-    pendingCursor = setTimeout(() => sendCursor(payload), 90);
+    pendingCursor = setTimeout(() => sendCursor(payload), 180);
     return;
   }
   lastSent = t;
-  fetch('/api/cursor', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-kindboard': '1' }, body: JSON.stringify(payload) }).catch(() => {});
+  lastPos = payload;
+  cursorInFlight = true;
+  fetch('/api/cursor', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-kindboard': '1' }, body: JSON.stringify(payload) })
+    .catch(() => {})
+    .finally(() => { cursorInFlight = false; });
 }
 viewport.addEventListener('pointermove', (e) => {
   if (S.view !== 'board' || !S.me || e.pointerType === 'touch') return;
@@ -1517,7 +1602,9 @@ function bindDraggable(el, type) {
     if (!start) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
-    if (!start.drag && Math.hypot(dx, dy) > 5 && start.can) {
+    const item = (type === 'note' ? S.notes : S.stickers).get(el.dataset.id);
+    const threshold = item?.mine ? 6 : 14; // moving someone else's note takes a deliberate drag
+    if (!start.drag && Math.hypot(dx, dy) > threshold && start.can) {
       start.drag = true;
       el.classList.add('dragging');
     }
@@ -1538,8 +1625,15 @@ function bindDraggable(el, type) {
     const id = el.dataset.id;
     if (!s.drag) {
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 8) return;
-      if (type === 'note') openThread(id);
-      else stickerMenu(id, e.clientX, e.clientY);
+      if (type === 'note') return openThread(id);
+      // Someone else's scribble or sticker on top of a note shouldn't get in the way of reading it:
+      // a tap goes through to the note. Your own pieces still open their menu (move/delete).
+      const piece = S.stickers.get(id);
+      if (!piece?.mine) {
+        const under = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest('#noteLayer .note')).find(Boolean);
+        if (under) return openThread(under.dataset.id);
+      }
+      stickerMenu(id, e.clientX, e.clientY);
       return;
     }
     el.classList.remove('dragging');
@@ -1707,7 +1801,7 @@ function paintReactBar(bar) {
     pick.replaceChildren(h('div', { class: 'react-pick' }, ...(S.cfg.reactions || []).map((e) => h('button', { type: 'button', class: 'react-opt', text: e, 'aria-label': `React ${e}`, onclick: () => { hidePopovers(); toggleReaction(type, id, e); } }))));
     pick.hidden = false;
     pick.style.left = `${Math.max(12, Math.min(r.left, innerWidth - 260))}px`;
-    pick.style.top = `${Math.max(12, r.top - 54)}px`;
+    pick.style.top = `${Math.min(innerHeight - 64, r.bottom + 6)}px`; // below the button, so it never covers the text
   };
   bar.replaceChildren(...chips, ...(can ? [add] : []));
 }
@@ -1900,7 +1994,15 @@ $('#composeText').addEventListener('input', (e) => {
 });
 $('#composeText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#composeForm').requestSubmit(); });
 
-const draft = { paper: 'plain', fastener: 'pin' };
+const draft = { paper: 'plain', fastener: 'pin', keepClear: store.get('kb_keep_clear') === '1' };
+for (const b of $$('[data-clear]')) b.setAttribute('aria-checked', String((b.dataset.clear === '1') === draft.keepClear));
+for (const b of $$('[data-clear]')) {
+  b.onclick = () => {
+    draft.keepClear = b.dataset.clear === '1';
+    store.set('kb_keep_clear', draft.keepClear ? '1' : '0');
+    for (const o of $$('[data-clear]')) o.setAttribute('aria-checked', String(o === b));
+  };
+}
 for (const b of $$('[data-paper], [data-fastener]')) {
   b.onclick = () => {
     const key = b.dataset.paper ? 'paper' : 'fastener';
@@ -1935,7 +2037,7 @@ async function dropNote(st, cx, cy) {
   const p = toWorld(cx, cy);
   try {
     const { note, support, pending } = await api('POST', '/api/notes', {
-      text: st.text, color: st.color, paper: st.paper, fastener: st.fastener, x: p.x - NOTE_W[size] / 2, y: p.y - 30,
+      text: st.text, color: st.color, paper: st.paper, fastener: st.fastener, keepClear: st.keepClear, x: p.x - NOTE_W[size] / 2, y: p.y - 30,
     });
     const el = upsertNote(note);
     el.classList.add('fresh');
@@ -2307,7 +2409,7 @@ function connectStream() {
   const es = new EventSource('/api/stream');
   S.stream = es;
   es.onopen = () => {
-    if (wasOpen && S.view === 'board') loadBoard(S.day); // reconnected: catch up on anything missed
+    if (wasOpen) syncBoard(); // reconnected: catch up on anything missed, without disturbing the view
     wasOpen = true;
   };
   const on = (name, fn) => es.addEventListener(name, (e) => fn(JSON.parse(e.data)));
