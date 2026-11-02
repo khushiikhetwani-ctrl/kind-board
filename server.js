@@ -376,10 +376,10 @@ async function hideForModeration(type, id) {
 // ---------------------------------------------------------------- serializers
 
 const NOTE_SQL = `
-  SELECT n.*, u.animal, u.color AS avatar,
+  SELECT n.*, u.animal, u.color AS avatar, u.look,
     (SELECT COUNT(*) FROM replies r WHERE r.note_id = n.id AND r.hidden = 0) AS reply_count
   FROM notes n JOIN users u ON u.id = n.user_id`;
-const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar FROM replies r JOIN users u ON u.id = r.user_id`;
+const REPLY_SQL = `SELECT r.*, u.animal, u.color AS avatar, u.look FROM replies r JOIN users u ON u.id = r.user_id`;
 
 // ---- emoji reactions: a small, kind set
 const REACTIONS = ['\u{1F49B}', '\u{1F917}', '\u{1FAF6}', '\u{1F60A}', '\u{1F64F}', '\u{1F331}']; // 💛 🤗 🫶 😊 🙏 🌱
@@ -394,10 +394,10 @@ async function reactionsFor(type, idsSql, args, viewerId) {
 
 const noteOut = (r) => ({
   id: r.id, day: r.day, text: r.text, color: r.color, paper: r.paper, fastener: r.fastener, x: r.x, y: r.y, rot: r.rot, pending: r.hidden === PENDING,
-  name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
+  name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), createdAt: r.created_at, replyCount: r.reply_count, userId: r.user_id,
 });
 const replyOut = (r) => ({
-  id: r.id, noteId: r.note_id, parentId: r.parent_id || null, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, createdAt: r.created_at, userId: r.user_id,
+  id: r.id, noteId: r.note_id, parentId: r.parent_id || null, text: r.text, pending: r.hidden === PENDING, name: `Anonymous ${r.animal}`, animal: r.animal, avatar: r.avatar, look: readLook(r), createdAt: r.created_at, userId: r.user_id,
 });
 const stickerOut = (r) => ({
   id: r.id, day: r.day, kind: r.kind, content: r.content, pending: r.hidden === PENDING, x: r.x, y: r.y, size: r.size, rot: r.rot, userId: r.user_id,

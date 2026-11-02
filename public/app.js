@@ -2,7 +2,7 @@
 // Flow: hello → what this is → kind rules → log in → calendar → a day's board.
 
 import { DOODLES, doodleEl } from './doodles.js';
-import { startGarden, drawCharacter, LOOKS, HAIRSTYLES, randomLook, WEATHERS } from './garden.js';
+import { startGarden, drawCharacter, characterPortrait, LOOKS, HAIRSTYLES, randomLook, WEATHERS } from './garden.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -83,9 +83,12 @@ function shiftDay(d, n) {
   dt.setDate(dt.getDate() + n);
   return isoDay(dt);
 }
+// Everyone's avatar is their pixel character once they've made one; until then, the first letter of their animal.
 function setAvatar(el, who) {
-  el.textContent = (who.animal || '?')[0];
   el.style.setProperty('--av', who.avatar || who.color);
+  el.classList.toggle('has-px', !!who.look);
+  if (who.look) el.replaceChildren(h('img', { src: characterPortrait(who.look), alt: '', draggable: 'false' }));
+  else el.textContent = (who.animal || '?')[0];
 }
 const displayName = (who) => (who.animal === 'Board' ? 'Kindboard' : who.name);
 const canPost = () => S.me && !S.me.banned && !S.archived;
@@ -615,6 +618,9 @@ $('#lookSave').onclick = async () => {
   try {
     const { me } = await api('PUT', '/api/me/look', draftLook);
     S.me = { ...S.me, ...me };
+    renderMe();
+    for (const n of S.notes.values()) if (n.mine) { n.look = me.look; upsertNote(n); }
+    if (S.openNote && S.notes.get(S.openNote)) renderThreadNote(S.notes.get(S.openNote));
     garden?.setLook(me.look);
     visitor?.setLook(me.look);
     $('#lookDlg').close();
@@ -628,7 +634,7 @@ $('#lookSave').onclick = async () => {
 
 function renderMe() {
   if (!S.me) return;
-  for (const el of $$('[data-me] .avatar, .me-menu .avatar')) setAvatar(el, S.me);
+  for (const el of $$('[data-me] .avatar, .me-menu .avatar, #tcAvatar')) setAvatar(el, S.me);
   for (const el of $$('[data-me] .me-name')) el.textContent = S.me.name;
   $('.me-big-name').textContent = S.me.name;
   $('.me-handle').textContent = `@${S.me.handle}`;

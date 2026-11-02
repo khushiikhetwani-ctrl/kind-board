@@ -153,6 +153,29 @@ const MOON = ['..mmm..', '.mmm...', 'mmm....', 'mmm....', 'mmm....', '.mmm...', 
 const SUN = ['..sss..', '.sssss.', 'sssssss', 'sssssss', 'sssssss', '.sssss.', '..sss..'];
 const UMBRELLA = ['....uu....', '..uuuuuu..', '.uuuuuuuu.', 'uuuuuuuuuu', 'u..u..u..u', '....k.....', '....k.....', '....k.....', '....k.....', '....k.....'];
 
+/** A head-and-shoulders portrait of someone's character, as a tiny image (for avatars). */
+const portraitCache = new Map();
+export function characterPortrait(look) {
+  const key = JSON.stringify(look);
+  if (portraitCache.has(key)) return portraitCache.get(key);
+  const { style, pal } = lookPalette(look);
+  const css = getComputedStyle(document.documentElement);
+  const base = { e: css.getPropertyValue('--px-eye').trim() || '#2b2228', c: css.getPropertyValue('--px-cheek').trim() || '#ef5a5a', m: css.getPropertyValue('--px-mouth').trim() || '#c2475a', b: '#5b3b2a' };
+  const rows = kidRows('idle', 'normal', style).slice(0, 13); // head + shoulders
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 16;
+  const ctx = canvas.getContext('2d');
+  rows.forEach((row, j) => [...row].forEach((k, i) => {
+    if (k === '.') return;
+    ctx.fillStyle = pal[k] ?? base[k] ?? base.e;
+    ctx.fillRect(i + 2, j + 3, 1, 1);
+  }));
+  const url = canvas.toDataURL('image/png');
+  portraitCache.set(key, url);
+  return url;
+}
+
 function cssColors() {
   const css = getComputedStyle(document.documentElement);
   const v = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
