@@ -348,9 +348,24 @@ for (const el of $$('[data-doodle]')) el.append(doodleEl(el.dataset.doodle));
 
 // ---------------------------------------------------------------- 2. auth
 
+function updateGoogleLinks() {
+  const on = !!S.cfg?.google;
+  for (const el of $$('[data-google], [data-google-note], [data-google-or]')) el.hidden = !on;
+  for (const a of $$('[data-google]')) {
+    const signup = !!a.closest('#signupForm');
+    const remember = (signup ? $('#rememberNew') : $('#rememberLogin')).checked ? '1' : '0';
+    a.href = `/auth/google/start?remember=${remember}${signup && S.signupAnimal ? `&animal=${encodeURIComponent(S.signupAnimal)}` : ''}`;
+  }
+}
+for (const id of ['#rememberNew', '#rememberLogin']) $(id).addEventListener('change', updateGoogleLinks);
+
 function showAuth() {
   if (!S.signupAnimal) rerollAnimal(false);
   if (store.get('kb_agreed')) $('#agree').checked = true;
+  updateGoogleLinks();
+  const g = new URLSearchParams(location.search).get('google');
+  const why = { expired: 'That took a little too long. Please try again.', cancelled: 'Google sign-in was cancelled.', error: 'Google sign-in didn\u2019t work. Please try again.', paused: 'New identities are paused from this network for a little while.', busy: 'Too many new identities from here. Try again later.', off: 'Google sign-in isn\u2019t set up yet.' }[g];
+  if (why) toast(why, 5000);
   showError($('#signupForm'), null);
   showError($('#loginForm'), null);
 }
@@ -374,7 +389,7 @@ function rerollAnimal(animate = true) {
     pick.classList.add('spin');
   }
 }
-$('#rerollAnimal').onclick = () => rerollAnimal();
+$('#rerollAnimal').onclick = () => { rerollAnimal(); updateGoogleLinks(); };
 for (const b of $$('.reveal')) {
   b.onclick = () => {
     const input = b.previousElementSibling;
@@ -588,6 +603,7 @@ function renderLookDialog() {
   opt('#lookSkin', LOOKS.skin, (_, i) => draftLook.skin === i, (_, i) => { draftLook.skin = i; }, (c, i) => swatch(c, `Skin tone ${i + 1}`));
   opt('#lookSuit', LOOKS.suit, (_, i) => draftLook.suit === i, (_, i) => { draftLook.suit = i; }, (c, i) => swatch(c[0], `Outfit colour ${i + 1}`));
 }
+$('#googleLinkBtn').onclick = () => { if (!S.me?.google) location.href = '/auth/google/start?mode=link'; };
 $('#lookBtn').onclick = () => {
   hidePopovers();
   draftLook = { ...myLook() };
@@ -616,6 +632,10 @@ function renderMe() {
   for (const el of $$('[data-me] .me-name')) el.textContent = S.me.name;
   $('.me-big-name').textContent = S.me.name;
   $('.me-handle').textContent = `@${S.me.handle}`;
+  const gl = $('#googleLinkBtn');
+  gl.hidden = !S.cfg?.google;
+  gl.disabled = !!S.me.google;
+  gl.querySelector('span').textContent = S.me.google ? 'Google sign-in is on' : 'Add Google sign-in';
   $('.strikes').replaceChildren(
     ...Array.from({ length: S.me.strikesToBan }, (_, i) => h('span', { class: `s${i < S.me.strikes ? ' on' : ''}` })),
     S.me.banned ? 'Paused after 2 strikes' : `${S.me.strikes} of ${S.me.strikesToBan} strikes`,
@@ -2180,6 +2200,20 @@ setInterval(() => {
     S.me = meRes.me;
     S.quotes = quoteRes?.quotes || [];
     if (S.me) connectStream();
+    const g = new URLSearchParams(location.search).get('google');
+    if (S.me && g) {
+      history.replaceState({}, '', location.pathname);
+      if (g === 'new') {
+        $('#savedName').textContent = S.me.name;
+        $('#savedHandle').textContent = S.me.handle;
+        setAvatar($('#savedAvatar'), S.me);
+        $('#savedDlg .muted').textContent = 'You signed in with Google, so there\u2019s no password to remember. Just choose Continue with Google next time. We never see your name or email.';
+        setTimeout(() => $('#savedDlg').showModal(), 2200);
+      } else {
+        const msg = { 'welcome-back': `Welcome back, ${S.me.name}`, linked: 'Google sign-in added. You can always get back in with it now.', taken: 'That Google account is already linked to another identity.' }[g];
+        if (msg) setTimeout(() => toast(msg, 5000), 2000);
+      }
+    }
     await route();
     refreshSky();
     if (sky.weather === 'live' && store.get('kb_geo')) fetchLiveWeather();

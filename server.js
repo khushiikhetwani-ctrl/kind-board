@@ -27,6 +27,11 @@ const CONFIG = {
   timeZone: process.env.BOARD_TZ || 'UTC', // when "today" rolls over
   trustProxy: process.env.TRUST_PROXY === '1', // behind Render/Fly/Nginx etc.
   cookieSecure: process.env.COOKIE_SECURE === '1' ? true : process.env.COOKIE_SECURE === '0' ? false : null, // null = auto
+  // Optional "Continue with Google". Only Google's anonymous account id is used, never email or name.
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''), // e.g. https://kind-board.onrender.com
+  accountSalt: process.env.ACCOUNT_SALT || process.env.IP_SALT || 'change-me-in-production', // never change once people sign in
   flagsToHide: Number(process.env.FLAGS_TO_HIDE) || 3, // distinct reports → back to moderator review
   strikesToBan: 2,
   ipBanDays: 7,
@@ -92,6 +97,8 @@ db.exec(`
   if (!cols.has('fastener')) db.exec("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
   const userCols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
   if (!userCols.has('look')) db.exec('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
+  if (!userCols.has('google_hash')) db.exec('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_google ON users(google_hash)');
 }
 
 const q = (sql) => db.prepare(sql);
@@ -207,13 +214,18 @@ function parseCookies(req) {
   }
   return out;
 }
+// Several cookies can be set on one response (e.g. the Google return trip), so append rather than replace.
+function addCookie(res, cookie) {
+  const prev = res.getHeader('set-cookie');
+  res.setHeader('set-cookie', [...(prev ? [].concat(prev) : []), cookie]);
+}
 function setSessionCookie(req, res, token, remember) {
   const attrs = ['Path=/', 'HttpOnly', 'SameSite=Strict', ...(isHttps(req) ? ['Secure'] : [])];
   if (remember) attrs.push(`Max-Age=${CONFIG.sessionDays * 86400}`);
-  res.setHeader('set-cookie', `kb_session=${token}; ${attrs.join('; ')}`);
+  addCookie(res, `kb_session=${token}; ${attrs.join('; ')}`);
 }
 function clearSessionCookie(req, res) {
-  res.setHeader('set-cookie', `kb_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isHttps(req) ? '; Secure' : ''}`);
+  addCookie(res, `kb_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isHttps(req) ? '; Secure' : ''}`);
 }
 function startSession(req, res, userId, remember) {
   const token = randomBytes(32).toString('base64url');
@@ -242,6 +254,8 @@ function readLook(u) {
 function publicMe(u) {
   return {
     look: readLook(u),
+    google: !!u.google_hash,
+    hasPassword: !!u.pass_hash && u.pass_hash !== '!',
     handle: u.handle, name: displayName(u), animal: u.animal, color: u.color,
     strikes: u.strikes, banned: !!u.banned, strikesToBan: CONFIG.strikesToBan,
   };
@@ -464,6 +478,7 @@ const route = (method, pattern, handler) => routes.push({ method, pattern, handl
 // Public: the landing page needs only these.
 route('GET', /^\/api\/config$/, () => ({
   today: today(), timeZone: CONFIG.timeZone, boardW: CONFIG.boardW, boardH: CONFIG.boardH,
+  google: googleReady(),
   noteColors: NOTE_COLORS, lineColors: LINE_COLORS, papers: PAPERS, fasteners: FASTENERS, strikesToBan: CONFIG.strikesToBan, flagsToHide: CONFIG.flagsToHide, animals: ANIMALS,
 }));
 route('GET', /^\/api\/quote$/, () => {
@@ -473,19 +488,25 @@ route('GET', /^\/api\/quote$/, () => {
   return { day, quote: quoteFor(day), quotes: quotesFor(day), notes: stats.notes, replies: replies.c, online: clients.size };
 });
 
-route('POST', /^\/api\/signup$/, async ({ req, res }) => {
-  const ip = ipHash(req);
+function signupAllowed(ip) {
   if (hits(`signup:${ip}`, 3_600_000).length >= 10) throw new HttpError(429, 'Too many new identities from here. Try again later.');
   const ban = q('SELECT until FROM banned_ips WHERE ip_hash = ?').get(ip);
   if (ban && ban.until > now()) throw new HttpError(403, 'New identities are paused from this network for a little while.', { banned: true });
+}
+function newHandle(animal) {
+  for (let i = 0; i < 20; i++) {
+    const candidate = `${animal.toLowerCase()}-${randomInt(1000, 10000)}`;
+    if (!q('SELECT 1 FROM users WHERE handle = ?').get(candidate)) return candidate;
+  }
+  throw new HttpError(503, 'Please try again.');
+}
+
+route('POST', /^\/api\/signup$/, async ({ req, res }) => {
+  const ip = ipHash(req);
+  signupAllowed(ip);
   const body = await readJson(req);
   const animal = ANIMALS.includes(body.animal) ? body.animal : pick(ANIMALS);
-  let handle;
-  for (let i = 0; i < 20 && !handle; i++) {
-    const candidate = `${animal.toLowerCase()}-${randomInt(1000, 10000)}`;
-    if (!q('SELECT 1 FROM users WHERE handle = ?').get(candidate)) handle = candidate;
-  }
-  if (!handle) throw new HttpError(503, 'Please try again.');
+  const handle = newHandle(animal);
   const problem = passphraseProblem(body.passphrase, handle);
   if (problem) throw new HttpError(400, problem, { field: 'passphrase' });
   hits(`signup:${ip}`, 3_600_000).push(now()); // only real sign-ups count toward the limit
@@ -529,6 +550,111 @@ route('POST', /^\/api\/logout-everywhere$/, ({ req, res, user }) => {
 });
 
 route('GET', /^\/api\/me$/, ({ user }) => ({ me: user ? publicMe(user) : null }));
+
+// ---- Continue with Google (OpenID Connect, authorization code flow with PKCE)
+// We request only the "openid" scope, so Google tells us nothing but a stable, anonymous
+// account id ("sub"). We store a salted hash of it, never the id itself, and no email or name.
+const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token'; // overridable for tests
+const googleReady = () => !!(CONFIG.googleClientId && CONFIG.googleClientSecret && CONFIG.publicUrl);
+const googleRedirect = () => `${CONFIG.publicUrl}/auth/google/callback`;
+const googleHash = (sub) => sha(`${CONFIG.accountSalt}:google:${sub}`);
+const oauthPending = new Map(); // state -> { verifier, nonce, mode, userId, remember, animal, at }
+setInterval(() => {
+  for (const [k, v] of oauthPending) if (now() - v.at > 600_000) oauthPending.delete(k);
+}, 120_000).unref();
+
+function redirect(res, location) {
+  res.writeHead(302, { location, 'cache-control': 'no-store' });
+  res.end();
+}
+
+async function googleStart(req, res, url) {
+  if (!googleReady()) return redirect(res, '/login?google=off');
+  rateLimit(`gstart:${ipHash(req)}`, 30, 600_000);
+  const mode = url.searchParams.get('mode') === 'link' ? 'link' : 'login';
+  const user = sessionUser(req);
+  if (mode === 'link' && !user) return redirect(res, '/login');
+  const state = randomBytes(24).toString('base64url');
+  const verifier = randomBytes(48).toString('base64url');
+  const nonce = randomBytes(16).toString('base64url');
+  const animal = url.searchParams.get('animal');
+  oauthPending.set(state, {
+    verifier, nonce, mode, userId: user?.id || null, at: now(),
+    remember: url.searchParams.get('remember') !== '0', animal: ANIMALS.includes(animal) ? animal : null,
+  });
+  // binds the round trip to this browser (Lax so it survives the redirect back from Google)
+  addCookie(res, `kb_oauth=${state}; Path=/auth/google; HttpOnly; SameSite=Lax; Max-Age=600${isHttps(req) ? '; Secure' : ''}`);
+  const params = new URLSearchParams({
+    client_id: CONFIG.googleClientId, redirect_uri: googleRedirect(), response_type: 'code', scope: 'openid',
+    state, nonce, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', prompt: 'select_account',
+  });
+  return redirect(res, `${GOOGLE_AUTH}?${params}`);
+}
+
+async function googleCallback(req, res, url) {
+  const fail = (why) => redirect(res, `/login?google=${why}`);
+  const state = url.searchParams.get('state') || '';
+  const pending = oauthPending.get(state);
+  oauthPending.delete(state);
+  addCookie(res, 'kb_oauth=; Path=/auth/google; HttpOnly; SameSite=Lax; Max-Age=0');
+  if (!pending || parseCookies(req).kb_oauth !== state || now() - pending.at > 600_000) return fail('expired');
+  if (url.searchParams.get('error')) return fail('cancelled');
+  let claims;
+  try {
+    const tokenRes = await fetch(GOOGLE_TOKEN, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: url.searchParams.get('code') || '', client_id: CONFIG.googleClientId, client_secret: CONFIG.googleClientSecret,
+        redirect_uri: googleRedirect(), grant_type: 'authorization_code', code_verifier: pending.verifier,
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokenRes.ok || !tokens.id_token) return fail('error');
+    // The id token came straight from Google's token endpoint over TLS, so its claims can be trusted
+    // (OpenID Connect Core §3.1.3.7); we still check who it's for, who issued it, freshness and the nonce.
+    claims = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64url').toString('utf8'));
+  } catch {
+    return fail('error');
+  }
+  const okIssuer = claims.iss === 'https://accounts.google.com' || claims.iss === 'accounts.google.com';
+  if (!okIssuer || claims.aud !== CONFIG.googleClientId || claims.nonce !== pending.nonce || !claims.sub || claims.exp * 1000 < now()) return fail('error');
+  const gHash = googleHash(claims.sub);
+  const owner = q('SELECT * FROM users WHERE google_hash = ?').get(gHash);
+
+  if (pending.mode === 'link') {
+    if (owner && owner.id !== pending.userId) return redirect(res, '/calendar?google=taken');
+    q('UPDATE users SET google_hash = ? WHERE id = ?').run(gHash, pending.userId);
+    return redirect(res, '/calendar?google=linked');
+  }
+  if (owner) {
+    startSession(req, res, owner.id, pending.remember);
+    return redirect(res, '/calendar?google=welcome-back');
+  }
+  // first time with this Google account: a brand-new anonymous identity
+  const ip = ipHash(req);
+  try {
+    signupAllowed(ip);
+  } catch (err) {
+    return fail(err.extra?.banned ? 'paused' : 'busy');
+  }
+  hits(`signup:${ip}`, 3_600_000).push(now());
+  const animal = pending.animal || pick(ANIMALS);
+  const id = randomUUID();
+  q('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, google_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    id, newHandle(animal), '!', animal, pick(AVATAR_COLORS), ip, gHash, now(), // '!' = no password; Google is the key
+  );
+  startSession(req, res, id, pending.remember);
+  return redirect(res, '/calendar?google=new');
+}
+
+route('DELETE', /^\/api\/me\/google$/, ({ user }) => {
+  requireUser(user);
+  if (!user.pass_hash || user.pass_hash === '!') throw new HttpError(400, 'Google is the only way into this identity, so it can\u2019t be removed.');
+  q('UPDATE users SET google_hash = NULL WHERE id = ?').run(user.id);
+  return { me: publicMe({ ...user, google_hash: null }) };
+});
 
 route('PUT', /^\/api\/me\/look$/, async ({ req, user }) => {
   requireUser(user);
@@ -910,6 +1036,8 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
   try {
     if (url.pathname === '/api/stream' && req.method === 'GET') return openStream(req, res, requireUser(sessionUser(req)));
+    if (url.pathname === '/auth/google/start' && req.method === 'GET') return await googleStart(req, res, url);
+    if (url.pathname === '/auth/google/callback' && req.method === 'GET') return await googleCallback(req, res, url);
     if (url.pathname.startsWith('/api/')) {
       checkCsrf(req);
       const user = sessionUser(req);

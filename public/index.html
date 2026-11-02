@@ -122,6 +122,9 @@
 
         <form id="signupForm" class="auth-form" autocomplete="on" novalidate>
           <div class="auth-title"><h1>Join Kindboard</h1><p>No email, no real names. Just you, anonymously.</p></div>
+          <a class="btn google block" data-google href="/auth/google/start"><svg class="g-logo" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>Continue with Google</a>
+          <p class="hint center g-note" data-google-note>Google only tells us "this is the same person as last time". Never your name or email.</p>
+          <div class="or" data-google-or><span>or</span></div>
           <div class="animal-pick">
             <span class="avatar" id="pickAvatar"></span>
             <span class="animal-name" id="pickName"></span>
@@ -141,7 +144,10 @@
         </form>
 
         <form id="loginForm" class="auth-form" autocomplete="on" hidden novalidate>
-          <div class="auth-title"><h1>Welcome back</h1><p>Log in with your handle and password.</p></div>
+          <div class="auth-title"><h1>Welcome back</h1><p>Log in with Google, or your handle and password.</p></div>
+          <a class="btn google block" data-google href="/auth/google/start"><svg class="g-logo" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>Continue with Google</a>
+          <p class="hint center g-note" data-google-note>Google only tells us "this is the same person as last time". Never your name or email.</p>
+          <div class="or" data-google-or><span>or</span></div>
           <input id="loginHandle" class="field" autocomplete="username" placeholder="Handle, e.g. otter-2841" autocapitalize="none" spellcheck="false" required aria-label="Handle">
           <div class="pass-field">
             <input type="password" id="loginPass" class="field" placeholder="Password" autocomplete="current-password" required aria-label="Password">
@@ -455,6 +461,7 @@
     </div>
     <div class="strikes"></div>
     <div class="menu-list">
+      <button id="googleLinkBtn" hidden><svg class="i"><use href="#i-lock"/></svg><span>Add Google sign-in</span></button>
       <button id="lookBtn"><svg class="i"><use href="#i-user"/></svg>Your character</button>
       <button data-open="guidelinesDlg"><svg class="i"><use href="#i-book"/></svg>Community guidelines</button>
       <button id="logoutBtn"><svg class="i"><use href="#i-logout"/></svg>Log out</button>

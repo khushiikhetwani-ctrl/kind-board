@@ -67,6 +67,30 @@ It's one Node process plus one SQLite file.
 | `COOKIE_SECURE` | auto | Force `1`/`0` if auto-detection is wrong for your host. |
 | `FLAGS_TO_HIDE` | `3` | Distinct reports that send a post back to review. |
 
+## Continue with Google (optional)
+
+People can sign in with Google instead of a password. Kindboard asks Google only for the `openid` scope, so it learns nothing but an anonymous account id, and stores only a salted hash of that. No name, email or photo, ever.
+
+1. Go to **console.cloud.google.com**, create a project, then **APIs & Services → OAuth consent screen**. Choose *External*, add the app name, your support email, and publish it.
+2. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type *Web application*.
+   - Authorised redirect URI: `https://YOUR-SITE/auth/google/callback` (e.g. `https://kind-board.onrender.com/auth/google/callback`)
+3. Copy the client ID and secret into Render's environment variables:
+
+| Env var | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | from step 2 |
+| `GOOGLE_CLIENT_SECRET` | from step 2 |
+| `PUBLIC_URL` | your site's address, e.g. `https://kind-board.onrender.com` |
+| `ACCOUNT_SALT` | a long random secret. **Never change it** once people have signed in, or they lose their way back. |
+
+The "Continue with Google" button appears automatically once these are set.
+
+## Before sharing publicly
+
+- **Keep data between restarts.** Render's free plan wipes everything on each restart. Use a paid instance with a disk mounted at `/data` and `DB_PATH=/data/kindboard.db`.
+- **Set strong secrets.** Long random `ADMIN_KEY`, `IP_SALT` and `ACCOUNT_SALT`.
+- **Watch `/admin`.** Approve waiting posts so nobody waits long, especially in the first days.
+
 ## Known limits
 
 - The word filter is a strong first line, not a perfect one. Extend `moderation.js`, or add an AI moderation service for nuance. Drawn stickers rely on flags.
