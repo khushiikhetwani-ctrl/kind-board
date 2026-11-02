@@ -36,7 +36,7 @@ Every day has its own board. When the day ends, the board is **archived**: anyon
 
 ## Run it
 
-Requires **Node 22.13+**. Zero dependencies, using built-in SQLite.
+Requires **Node 22+**. Run `npm install` once, then:
 
 ```bash
 ADMIN_KEY=choose-a-secret IP_SALT=another-random-secret npm start
@@ -85,9 +85,26 @@ People can sign in with Google instead of a password. Kindboard asks Google only
 
 The "Continue with Google" button appears automatically once these are set.
 
+## Free hosting that keeps its data (Render free + Turso free)
+
+Render's free plan wipes its disk whenever the site sleeps or restarts, so keep the data in a free hosted database instead:
+
+1. Sign up at **turso.tech** and create a database (pick the region closest to your Render region).
+2. Copy its **URL** (starts with `libsql://`) and create an **auth token**.
+3. In Render → your service → **Environment**, add:
+
+| Env var | Value |
+|---|---|
+| `TURSO_DATABASE_URL` | the `libsql://…` URL |
+| `TURSO_AUTH_TOKEN` | the token |
+
+Save, and Render redeploys. The log should say `database: hosted (…turso.io)`. Tables are created automatically on first start.
+
+Free-plan notes: the site sleeps after ~15 idle minutes and takes ~30–60 s to wake. A free uptime monitor (e.g. UptimeRobot) pinging `/api/config` every 5 minutes keeps it awake.
+
 ## Before sharing publicly
 
-- **Keep data between restarts.** Render's free plan wipes everything on each restart. Use a paid instance with a disk mounted at `/data` and `DB_PATH=/data/kindboard.db`.
+- **Keep data between restarts.** Use a hosted database (above), or a paid Render instance with a disk at `/data`.
 - **Set strong secrets.** Long random `ADMIN_KEY`, `IP_SALT` and `ACCOUNT_SALT`.
 - **Watch `/admin`.** Approve waiting posts so nobody waits long, especially in the first days.
 

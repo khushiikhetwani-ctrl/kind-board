@@ -11,7 +11,7 @@ import { createHash, randomBytes, randomUUID, randomInt, scrypt, timingSafeEqual
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import { createClient } from '@libsql/client';
 import { checkText, checkTile } from './moderation.js';
 import { quoteFor, quotesFor, wordsFor, isBankWord, DOODLES } from './content.js';
 
@@ -22,6 +22,10 @@ const scryptAsync = promisify(scrypt);
 const CONFIG = {
   port: Number(process.env.PORT) || 3000,
   dbPath: process.env.DB_PATH || path.join(ROOT, 'kindboard.db'),
+  // A hosted database (e.g. Turso, free tier) keeps everything safe even when the web server
+  // restarts. Without these, data lives in the local file at DB_PATH.
+  dbUrl: process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || '',
+  dbToken: process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN || '',
   adminKey: process.env.ADMIN_KEY || '',
   ipSalt: process.env.IP_SALT || 'change-me-in-production',
   timeZone: process.env.BOARD_TZ || 'UTC', // when "today" rolls over
@@ -46,10 +50,23 @@ if (!CONFIG.adminKey) console.warn('[kindboard] ADMIN_KEY not set, so the modera
 
 // ---------------------------------------------------------------- database
 
-const db = new DatabaseSync(CONFIG.dbPath);
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
+const db = createClient(CONFIG.dbUrl ? { url: CONFIG.dbUrl, authToken: CONFIG.dbToken || undefined } : { url: `file:${CONFIG.dbPath}` });
+console.log(`[kindboard] database: ${CONFIG.dbUrl ? 'hosted (' + new URL(CONFIG.dbUrl.replace(/^libsql:/, 'https:')).host + ')' : 'local file'}`);
+
+// Rows come back as plain objects; undefined arguments become NULL.
+const toRow = (rs, row) => Object.fromEntries(rs.columns.map((c, i) => [c, row[i]]));
+async function dbAll(sql, ...args) {
+  const rs = await db.execute({ sql, args: args.map((a) => (a === undefined ? null : a)) });
+  return rs.rows.map((row) => toRow(rs, row));
+}
+async function dbGet(sql, ...args) {
+  return (await dbAll(sql, ...args))[0];
+}
+async function dbRun(sql, ...args) {
+  await db.execute({ sql, args: args.map((a) => (a === undefined ? null : a)) });
+}
+
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL, pass_hash TEXT NOT NULL, animal TEXT NOT NULL,
     color TEXT NOT NULL, ip_hash TEXT, strikes INTEGER NOT NULL DEFAULT 0,
@@ -89,19 +106,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS replies_note ON replies(note_id, hidden);
   CREATE INDEX IF NOT EXISTS stickers_day ON stickers(day, hidden);
   CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
-`);
-// Later additions to the notes table (safe to run on existing databases).
-{
-  const cols = new Set(db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name));
-  if (!cols.has('paper')) db.exec("ALTER TABLE notes ADD COLUMN paper TEXT NOT NULL DEFAULT 'plain'");
-  if (!cols.has('fastener')) db.exec("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
-  const userCols = new Set(db.prepare('PRAGMA table_info(users)').all().map((c) => c.name));
-  if (!userCols.has('look')) db.exec('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
-  if (!userCols.has('google_hash')) db.exec('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_google ON users(google_hash)');
+`;
+async function setupDatabase() {
+  if (!CONFIG.dbUrl) await dbRun('PRAGMA journal_mode = WAL');
+  await db.executeMultiple(SCHEMA);
+  // Later additions (safe to run on existing databases).
+  const cols = new Set((await dbAll('PRAGMA table_info(notes)')).map((c) => c.name));
+  if (!cols.has('paper')) await dbRun("ALTER TABLE notes ADD COLUMN paper TEXT NOT NULL DEFAULT 'plain'");
+  if (!cols.has('fastener')) await dbRun("ALTER TABLE notes ADD COLUMN fastener TEXT NOT NULL DEFAULT 'pin'");
+  const userCols = new Set((await dbAll('PRAGMA table_info(users)')).map((c) => c.name));
+  if (!userCols.has('look')) await dbRun('ALTER TABLE users ADD COLUMN look TEXT'); // their pixel character, as JSON
+  if (!userCols.has('google_hash')) await dbRun('ALTER TABLE users ADD COLUMN google_hash TEXT'); // salted hash of Google's anonymous id
+  await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS users_google ON users(google_hash)');
 }
-
-const q = (sql) => db.prepare(sql);
 const TABLES = { note: 'notes', reply: 'replies', sticker: 'stickers' };
 
 // ---------------------------------------------------------------- helpers
@@ -166,10 +183,10 @@ function rateLimit(key, max, windowMs, message = 'Slow down a little and try aga
   if (list.length >= max) throw new HttpError(429, message);
   list.push(now());
 }
-setInterval(() => {
+setInterval(async () => {
   const t = now();
   for (const [k, list] of buckets) if (list.every((h) => t - h > 3_600_000)) buckets.delete(k);
-  q('DELETE FROM sessions WHERE expires_at < ?').run(t);
+  (await dbRun('DELETE FROM sessions WHERE expires_at < ?', t));
 }, 600_000).unref();
 
 // ---------------------------------------------------------------- accounts & sessions
@@ -227,16 +244,16 @@ function setSessionCookie(req, res, token, remember) {
 function clearSessionCookie(req, res) {
   addCookie(res, `kb_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isHttps(req) ? '; Secure' : ''}`);
 }
-function startSession(req, res, userId, remember) {
+async function startSession(req, res, userId, remember) {
   const token = randomBytes(32).toString('base64url');
   const ttl = remember ? CONFIG.sessionDays * 86_400_000 : 86_400_000; // non-remembered: 1 day max
-  q('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(sha(token), userId, now(), now() + ttl);
+  (await dbRun('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', sha(token), userId, now(), now() + ttl));
   setSessionCookie(req, res, token, remember);
 }
-function sessionUser(req) {
+async function sessionUser(req) {
   const token = parseCookies(req).kb_session;
   if (!token || token.length > 100) return null;
-  const row = q(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`).get(sha(token), now());
+  const row = (await dbGet(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`, sha(token), now()));
   return row || null;
 }
 
@@ -283,13 +300,13 @@ const visibleTo = (alias = '') => `(${alias}hidden = 0 OR (${alias}hidden = ${PE
 // Every post is checked automatically. Clearly harmful text is refused and counts as a
 // strike; unkind-but-fixable text is refused so it can be rephrased; text a filter can't
 // judge (links, contact details) is accepted but held for approval.
-function moderate(text, user) {
+async function moderate(text, user) {
   const result = checkText(text);
   if (!result.ok) {
     let message = result.reason;
     if (result.severe && user) {
-      addStrike(user.id);
-      const u = q('SELECT strikes, banned FROM users WHERE id = ?').get(user.id);
+      (await addStrike(user.id));
+      const u = (await dbGet('SELECT strikes, banned FROM users WHERE id = ?', user.id));
       message += u.banned
         ? ' That was a second strike, so this identity is now paused. You can still read.'
         : ` This counts as a strike (${u.strikes} of ${CONFIG.strikesToBan}).`;
@@ -305,44 +322,44 @@ function emit(event, item, row) {
   else broadcast(event, item);
 }
 
-function addStrike(userId) {
-  const u = q('SELECT * FROM users WHERE id = ?').get(userId);
+async function addStrike(userId) {
+  const u = (await dbGet('SELECT * FROM users WHERE id = ?', userId));
   if (!u) return;
   const strikes = u.strikes + 1;
   const banned = strikes >= CONFIG.strikesToBan ? 1 : 0;
-  q('UPDATE users SET strikes = ?, banned = ? WHERE id = ?').run(strikes, banned, userId);
+  (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
   if (banned && !u.banned) {
     if (u.ip_hash) {
-      q('INSERT OR REPLACE INTO banned_ips (ip_hash, until) VALUES (?, ?)').run(u.ip_hash, now() + CONFIG.ipBanDays * 86_400_000);
+      (await dbRun('INSERT OR REPLACE INTO banned_ips (ip_hash, until) VALUES (?, ?)', u.ip_hash, now() + CONFIG.ipBanDays * 86_400_000));
     }
     // A banned identity's content leaves the board.
     for (const [type, table] of Object.entries(TABLES)) {
-      for (const row of q(`SELECT id FROM ${table} WHERE user_id = ? AND hidden = 0`).all(userId)) {
-        q(`UPDATE ${table} SET hidden = 1 WHERE id = ?`).run(row.id);
-        broadcastRemoval(type, row.id);
+      for (const row of (await dbAll(`SELECT id FROM ${table} WHERE user_id = ? AND hidden = 0`, userId))) {
+        (await dbRun(`UPDATE ${table} SET hidden = 1 WHERE id = ?`, row.id));
+        (await broadcastRemoval(type, row.id));
       }
     }
   }
   sendTo(userId, 'me', publicMe({ ...u, strikes, banned }));
 }
 
-function removeStrike(userId) {
-  const u = q('SELECT * FROM users WHERE id = ?').get(userId);
+async function removeStrike(userId) {
+  const u = (await dbGet('SELECT * FROM users WHERE id = ?', userId));
   if (!u) return;
   const strikes = Math.max(0, u.strikes - 1);
   const banned = strikes >= CONFIG.strikesToBan ? 1 : 0;
-  q('UPDATE users SET strikes = ?, banned = ? WHERE id = ?').run(strikes, banned, userId);
-  if (!banned && u.banned && u.ip_hash) q('DELETE FROM banned_ips WHERE ip_hash = ?').run(u.ip_hash);
+  (await dbRun('UPDATE users SET strikes = ?, banned = ? WHERE id = ?', strikes, banned, userId));
+  if (!banned && u.banned && u.ip_hash) (await dbRun('DELETE FROM banned_ips WHERE ip_hash = ?', u.ip_hash));
   sendTo(userId, 'me', publicMe({ ...u, strikes, banned }));
 }
 
-function hideForModeration(type, id) {
+async function hideForModeration(type, id) {
   const table = TABLES[type];
-  const row = q(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const row = (await dbGet(`SELECT * FROM ${table} WHERE id = ?`, id));
   if (!row) return;
-  q(`UPDATE ${table} SET hidden = 1, struck = 1 WHERE id = ?`).run(id);
-  if (row.hidden === 0) broadcastRemoval(type, id);
-  if (!row.struck) addStrike(row.user_id);
+  (await dbRun(`UPDATE ${table} SET hidden = 1, struck = 1 WHERE id = ?`, id));
+  if (row.hidden === 0) (await broadcastRemoval(type, id));
+  if (!row.struck) (await addStrike(row.user_id));
 }
 
 // ---------------------------------------------------------------- serializers
@@ -368,8 +385,8 @@ const forViewer = (item, viewerId) => {
   const { userId, ...rest } = item;
   return { ...rest, mine: !!viewerId && userId === viewerId };
 };
-const getNote = (id) => {
-  const r = q(`${NOTE_SQL} WHERE n.id = ?`).get(id);
+const getNote = async (id) => {
+  const r = (await dbGet(`${NOTE_SQL} WHERE n.id = ?`, id));
   return r ? noteOut(r) : null;
 };
 
@@ -402,8 +419,8 @@ function broadcast(event, item) {
 function sendTo(userId, event, data) {
   for (const c of clients) if (c.userId === userId) write(c, event, data);
 }
-function broadcastRemoval(type, id) {
-  const extra = type === 'reply' ? { noteId: q('SELECT note_id FROM replies WHERE id = ?').get(id)?.note_id } : {};
+async function broadcastRemoval(type, id) {
+  const extra = type === 'reply' ? { noteId: (await dbGet('SELECT note_id FROM replies WHERE id = ?', id))?.note_id } : {};
   broadcast('removed', { type, id, ...extra });
 }
 let presenceTimer;
@@ -462,13 +479,13 @@ function validPng(dataUrl, maxBytes = 150 * 1024) {
   return buf.length > 8 && buf.length <= maxBytes && buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
 }
 
-function ownedRow(type, id, user) {
-  const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden IN (0, ${PENDING})`).get(id);
+async function ownedRow(type, id, user) {
+  const row = (await dbGet(`SELECT * FROM ${TABLES[type]} WHERE id = ? AND hidden IN (0, ${PENDING})`, id));
   if (!row) throw new HttpError(404, 'That is no longer on the board.');
   if (row.user_id !== user.id) throw new HttpError(403, 'You can only change your own things.');
   return row;
 }
-const dayOf = (type, row) => (type === 'reply' ? q('SELECT day FROM notes WHERE id = ?').get(row.note_id)?.day : row.day);
+const dayOf = async (type, row) => (type === 'reply' ? (await dbGet('SELECT day FROM notes WHERE id = ?', row.note_id))?.day : row.day);
 
 // ---------------------------------------------------------------- routes
 
@@ -476,46 +493,44 @@ const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
 // Public: the landing page needs only these.
-route('GET', /^\/api\/config$/, () => ({
+route('GET', /^\/api\/config$/, async () => ({
   today: today(), timeZone: CONFIG.timeZone, boardW: CONFIG.boardW, boardH: CONFIG.boardH,
   google: googleReady(),
   noteColors: NOTE_COLORS, lineColors: LINE_COLORS, papers: PAPERS, fasteners: FASTENERS, strikesToBan: CONFIG.strikesToBan, flagsToHide: CONFIG.flagsToHide, animals: ANIMALS,
 }));
-route('GET', /^\/api\/quote$/, () => {
+route('GET', /^\/api\/quote$/, async () => {
   const day = today();
-  const stats = q(`SELECT COUNT(*) AS notes FROM notes WHERE day = ? AND hidden = 0`).get(day);
-  const replies = q(`SELECT COUNT(*) AS c FROM replies r JOIN notes n ON n.id = r.note_id WHERE n.day = ? AND r.hidden = 0`).get(day);
+  const stats = (await dbGet(`SELECT COUNT(*) AS notes FROM notes WHERE day = ? AND hidden = 0`, day));
+  const replies = (await dbGet(`SELECT COUNT(*) AS c FROM replies r JOIN notes n ON n.id = r.note_id WHERE n.day = ? AND r.hidden = 0`, day));
   return { day, quote: quoteFor(day), quotes: quotesFor(day), notes: stats.notes, replies: replies.c, online: clients.size };
 });
 
-function signupAllowed(ip) {
+async function signupAllowed(ip) {
   if (hits(`signup:${ip}`, 3_600_000).length >= 10) throw new HttpError(429, 'Too many new identities from here. Try again later.');
-  const ban = q('SELECT until FROM banned_ips WHERE ip_hash = ?').get(ip);
+  const ban = (await dbGet('SELECT until FROM banned_ips WHERE ip_hash = ?', ip));
   if (ban && ban.until > now()) throw new HttpError(403, 'New identities are paused from this network for a little while.', { banned: true });
 }
-function newHandle(animal) {
+async function newHandle(animal) {
   for (let i = 0; i < 20; i++) {
     const candidate = `${animal.toLowerCase()}-${randomInt(1000, 10000)}`;
-    if (!q('SELECT 1 FROM users WHERE handle = ?').get(candidate)) return candidate;
+    if (!(await dbGet('SELECT 1 FROM users WHERE handle = ?', candidate))) return candidate;
   }
   throw new HttpError(503, 'Please try again.');
 }
 
 route('POST', /^\/api\/signup$/, async ({ req, res }) => {
   const ip = ipHash(req);
-  signupAllowed(ip);
+  (await signupAllowed(ip));
   const body = await readJson(req);
   const animal = ANIMALS.includes(body.animal) ? body.animal : pick(ANIMALS);
-  const handle = newHandle(animal);
+  const handle = (await newHandle(animal));
   const problem = passphraseProblem(body.passphrase, handle);
   if (problem) throw new HttpError(400, problem, { field: 'passphrase' });
   hits(`signup:${ip}`, 3_600_000).push(now()); // only real sign-ups count toward the limit
   const id = randomUUID();
-  q('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    id, handle, await hashPassphrase(body.passphrase), animal, pick(AVATAR_COLORS), ip, now(),
-  );
-  startSession(req, res, id, !!body.remember);
-  return { me: publicMe(q('SELECT * FROM users WHERE id = ?').get(id)) };
+  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', id, handle, await hashPassphrase(body.passphrase), animal, pick(AVATAR_COLORS), ip, now(),));
+  (await startSession(req, res, id, !!body.remember));
+  return { me: publicMe((await dbGet('SELECT * FROM users WHERE id = ?', id))) };
 });
 
 route('POST', /^\/api\/login$/, async ({ req, res }) => {
@@ -525,31 +540,31 @@ route('POST', /^\/api\/login$/, async ({ req, res }) => {
   rateLimit(`login-ip:${ip}`, 20, 900_000, 'Too many attempts. Wait a few minutes.');
   // Per-handle lockout stops slow, distributed guessing against one identity.
   if (hits(`login-fail:${handle}`, 900_000).length >= 8) throw new HttpError(429, 'This handle is locked for 15 minutes after too many attempts.');
-  const user = /^[a-z]+-\d{4}$/.test(handle) ? q('SELECT * FROM users WHERE handle = ?').get(handle) : null;
+  const user = /^[a-z]+-\d{4}$/.test(handle) ? (await dbGet('SELECT * FROM users WHERE handle = ?', handle)) : null;
   const ok = await verifyPassphrase(body.passphrase, user?.pass_hash);
   if (!user || !ok) {
     hits(`login-fail:${handle}`, 900_000).push(now());
     throw new HttpError(401, 'That handle and password don’t match.');
   }
-  startSession(req, res, user.id, !!body.remember);
+  (await startSession(req, res, user.id, !!body.remember));
   return { me: publicMe(user) };
 });
 
-route('POST', /^\/api\/logout$/, ({ req, res }) => {
+route('POST', /^\/api\/logout$/, async ({ req, res }) => {
   const token = parseCookies(req).kb_session;
-  if (token) q('DELETE FROM sessions WHERE token_hash = ?').run(sha(token));
+  if (token) (await dbRun('DELETE FROM sessions WHERE token_hash = ?', sha(token)));
   clearSessionCookie(req, res);
   return { ok: true };
 });
 
-route('POST', /^\/api\/logout-everywhere$/, ({ req, res, user }) => {
+route('POST', /^\/api\/logout-everywhere$/, async ({ req, res, user }) => {
   requireUser(user);
-  q('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+  (await dbRun('DELETE FROM sessions WHERE user_id = ?', user.id));
   clearSessionCookie(req, res);
   return { ok: true };
 });
 
-route('GET', /^\/api\/me$/, ({ user }) => ({ me: user ? publicMe(user) : null }));
+route('GET', /^\/api\/me$/, async ({ user }) => ({ me: user ? publicMe(user) : null }));
 
 // ---- Continue with Google (OpenID Connect, authorization code flow with PKCE)
 // We request only the "openid" scope, so Google tells us nothing but a stable, anonymous
@@ -573,7 +588,7 @@ async function googleStart(req, res, url) {
   if (!googleReady()) return redirect(res, '/login?google=off');
   rateLimit(`gstart:${ipHash(req)}`, 30, 600_000);
   const mode = url.searchParams.get('mode') === 'link' ? 'link' : 'login';
-  const user = sessionUser(req);
+  const user = (await sessionUser(req));
   if (mode === 'link' && !user) return redirect(res, '/login');
   const state = randomBytes(24).toString('base64url');
   const verifier = randomBytes(48).toString('base64url');
@@ -621,38 +636,36 @@ async function googleCallback(req, res, url) {
   const okIssuer = claims.iss === 'https://accounts.google.com' || claims.iss === 'accounts.google.com';
   if (!okIssuer || claims.aud !== CONFIG.googleClientId || claims.nonce !== pending.nonce || !claims.sub || claims.exp * 1000 < now()) return fail('error');
   const gHash = googleHash(claims.sub);
-  const owner = q('SELECT * FROM users WHERE google_hash = ?').get(gHash);
+  const owner = (await dbGet('SELECT * FROM users WHERE google_hash = ?', gHash));
 
   if (pending.mode === 'link') {
     if (owner && owner.id !== pending.userId) return redirect(res, '/calendar?google=taken');
-    q('UPDATE users SET google_hash = ? WHERE id = ?').run(gHash, pending.userId);
+    (await dbRun('UPDATE users SET google_hash = ? WHERE id = ?', gHash, pending.userId));
     return redirect(res, '/calendar?google=linked');
   }
   if (owner) {
-    startSession(req, res, owner.id, pending.remember);
+    (await startSession(req, res, owner.id, pending.remember));
     return redirect(res, '/calendar?google=welcome-back');
   }
   // first time with this Google account: a brand-new anonymous identity
   const ip = ipHash(req);
   try {
-    signupAllowed(ip);
+    (await signupAllowed(ip));
   } catch (err) {
     return fail(err.extra?.banned ? 'paused' : 'busy');
   }
   hits(`signup:${ip}`, 3_600_000).push(now());
   const animal = pending.animal || pick(ANIMALS);
   const id = randomUUID();
-  q('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, google_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    id, newHandle(animal), '!', animal, pick(AVATAR_COLORS), ip, gHash, now(), // '!' = no password; Google is the key
-  );
-  startSession(req, res, id, pending.remember);
+  (await dbRun('INSERT INTO users (id, handle, pass_hash, animal, color, ip_hash, google_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, (await newHandle(animal)), '!', animal, pick(AVATAR_COLORS), ip, gHash, now())); // '!' = no password; Google is the key
+  (await startSession(req, res, id, pending.remember));
   return redirect(res, '/calendar?google=new');
 }
 
-route('DELETE', /^\/api\/me\/google$/, ({ user }) => {
+route('DELETE', /^\/api\/me\/google$/, async ({ user }) => {
   requireUser(user);
   if (!user.pass_hash || user.pass_hash === '!') throw new HttpError(400, 'Google is the only way into this identity, so it can\u2019t be removed.');
-  q('UPDATE users SET google_hash = NULL WHERE id = ?').run(user.id);
+  (await dbRun('UPDATE users SET google_hash = NULL WHERE id = ?', user.id));
   return { me: publicMe({ ...user, google_hash: null }) };
 });
 
@@ -660,17 +673,17 @@ route('PUT', /^\/api\/me\/look$/, async ({ req, user }) => {
   requireUser(user);
   rateLimit(`look:${user.id}`, 30, 600_000);
   const look = cleanLook(await readJson(req, 1024));
-  q('UPDATE users SET look = ? WHERE id = ?').run(JSON.stringify(look), user.id);
+  (await dbRun('UPDATE users SET look = ? WHERE id = ?', JSON.stringify(look), user.id));
   return { me: publicMe({ ...user, look: JSON.stringify(look) }) };
 });
 
-route('GET', /^\/api\/board$/, ({ url, user }) => {
+route('GET', /^\/api\/board$/, async ({ url, user }) => {
   requireUser(user);
   const day = url.searchParams.get('day') || today();
   if (!isDay(day)) throw new HttpError(400, 'Invalid date.');
   if (day > today()) throw new HttpError(404, 'That day hasn’t happened yet.');
-  const notes = q(`${NOTE_SQL} WHERE n.day = ? AND ${visibleTo('n.')} ORDER BY n.created_at`).all(day, user.id).map(noteOut);
-  const stickers = q(`SELECT * FROM stickers WHERE day = ? AND ${visibleTo()} ORDER BY created_at`).all(day, user.id).map(stickerOut);
+  const notes = (await dbAll(`${NOTE_SQL} WHERE n.day = ? AND ${visibleTo('n.')} ORDER BY n.created_at`, day, user.id)).map(noteOut);
+  const stickers = (await dbAll(`SELECT * FROM stickers WHERE day = ? AND ${visibleTo()} ORDER BY created_at`, day, user.id)).map(stickerOut);
   return {
     day, today: today(), archived: day !== today(), quote: quoteFor(day),
     notes: notes.map((n) => forViewer(n, user.id)),
@@ -678,27 +691,32 @@ route('GET', /^\/api\/board$/, ({ url, user }) => {
   };
 });
 
-route('GET', /^\/api\/calendar$/, ({ url, user }) => {
+route('GET', /^\/api\/calendar$/, async ({ url, user }) => {
   requireUser(user);
   const month = url.searchParams.get('month') || today().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'Invalid month.');
   const days = {};
-  for (const r of q(`SELECT day, COUNT(*) AS c, GROUP_CONCAT(color) AS colors FROM notes WHERE day LIKE ? AND hidden = 0 GROUP BY day`).all(`${month}-%`)) {
+  for (const r of (await dbAll(`SELECT day, COUNT(*) AS c, GROUP_CONCAT(color) AS colors FROM notes WHERE day LIKE ? AND hidden = 0 GROUP BY day`, `${month}-%`))) {
     days[r.day] = { notes: r.c, replies: 0, colors: r.colors.split(',').slice(0, 8), preview: null };
   }
-  for (const r of q(`SELECT n.day, COUNT(*) AS c FROM replies r JOIN notes n ON n.id = r.note_id
-                     WHERE n.day LIKE ? AND r.hidden = 0 AND n.hidden = 0 GROUP BY n.day`).all(`${month}-%`)) {
+  for (const r of (await dbAll(`SELECT n.day, COUNT(*) AS c FROM replies r JOIN notes n ON n.id = r.note_id
+                     WHERE n.day LIKE ? AND r.hidden = 0 AND n.hidden = 0 GROUP BY n.day`, `${month}-%`))) {
     if (days[r.day]) days[r.day].replies = r.c;
   }
-  // A short line from the most-replied note of each day, for the calendar preview.
-  for (const day of Object.keys(days)) {
-    const top = q(`${NOTE_SQL} WHERE n.day = ? AND n.hidden = 0 ORDER BY reply_count DESC, n.created_at LIMIT 1`).get(day);
-    if (top) days[day].preview = top.text.slice(0, 90);
-  }
+  // A short line from the most-replied note of each day, for the calendar preview (one query for the month).
+  const tops = await dbAll(`
+    SELECT day, text FROM (
+      SELECT n.day, n.text, ROW_NUMBER() OVER (
+        PARTITION BY n.day
+        ORDER BY (SELECT COUNT(*) FROM replies r WHERE r.note_id = n.id AND r.hidden = 0) DESC, n.created_at
+      ) AS rn
+      FROM notes n WHERE n.day LIKE ? AND n.hidden = 0
+    ) WHERE rn = 1`, `${month}-%`);
+  for (const t of tops) if (days[t.day]) days[t.day].preview = t.text.slice(0, 90);
   return { month, today: today(), days };
 });
 
-route('GET', /^\/api\/words$/, ({ url, user }) => {
+route('GET', /^\/api\/words$/, async ({ url, user }) => {
   requireUser(user);
   const day = url.searchParams.get('day') || today();
   return wordsFor(isDay(day) ? day : today());
@@ -709,16 +727,14 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
   const body = await readJson(req);
   const day = today();
   const text = cleanText(body.text);
-  const { support, hold } = moderate(text, user);
+  const { support, hold } = (await moderate(text, user));
   rateLimit(`note:${user.id}`, 4, 60_000, 'You’ve pinned a few notes quickly. Take a breath and try again in a minute.');
   const color = NOTE_COLORS.includes(body.color) ? body.color : 'butter';
   const paper = PAPERS.includes(body.paper) ? body.paper : 'plain';
   const fastener = FASTENERS.includes(body.fastener) ? body.fastener : 'pin';
   const id = randomUUID();
-  q('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    id, day, user.id, text, color, paper, fastener, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now(),
-  );
-  const note = getNote(id);
+  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, paper, fastener, x, y, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, day, user.id, text, color, paper, fastener, posX(body.x, 260), posY(body.y, 200), jitter(4), hold ? PENDING : 0, now(),));
+  const note = (await getNote(id));
   emit('note', note, { hidden: hold ? PENDING : 0, user_id: user.id });
   return { note: forViewer(note, user.id), support, pending: hold };
 });
@@ -726,7 +742,7 @@ route('POST', /^\/api\/notes$/, async ({ req, user }) => {
 route('POST', /^\/api\/notes\/check$/, async ({ req, user }) => {
   requirePoster(user);
   requireToday(today());
-  const { hold } = moderate(cleanText((await readJson(req)).text), user);
+  const { hold } = (await moderate(cleanText((await readJson(req)).text), user));
   return { ok: true, pending: hold };
 });
 
@@ -749,39 +765,39 @@ route('POST', /^\/api\/cursor$/, async ({ req, user }) => {
 route('PATCH', /^\/api\/notes\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
   // Notes can be rearranged by anyone, like a shared corkboard. Waiting notes only by their writer.
-  const row = q(`SELECT * FROM notes WHERE id = ? AND ${visibleTo()}`).get(params[0], user.id);
+  const row = (await dbGet(`SELECT * FROM notes WHERE id = ? AND ${visibleTo()}`, params[0], user.id));
   if (!row) throw new HttpError(404, 'That is no longer on the board.');
   rateLimit(`move:${user.id}`, 90, 60_000, 'Lots of rearranging! Give it a moment.');
   requireToday(row.day);
   const body = await readJson(req);
-  q('UPDATE notes SET x = ?, y = ? WHERE id = ?').run(posX(body.x, 260), posY(body.y, 200), row.id);
-  const note = getNote(row.id);
+  (await dbRun('UPDATE notes SET x = ?, y = ? WHERE id = ?', posX(body.x, 260), posY(body.y, 200), row.id));
+  const note = (await getNote(row.id));
   emit('note', note, row);
   return { note: forViewer(note, user.id) };
 });
 
-route('GET', /^\/api\/notes\/([\w-]+)$/, ({ user, params }) => {
+route('GET', /^\/api\/notes\/([\w-]+)$/, async ({ user, params }) => {
   requireUser(user);
-  const r = q(`${NOTE_SQL} WHERE n.id = ? AND ${visibleTo('n.')}`).get(params[0], user.id);
+  const r = (await dbGet(`${NOTE_SQL} WHERE n.id = ? AND ${visibleTo('n.')}`, params[0], user.id));
   if (!r) throw new HttpError(404, 'This note is no longer on the board.');
-  const replies = q(`${REPLY_SQL} WHERE r.note_id = ? AND ${visibleTo('r.')} ORDER BY r.created_at`).all(params[0], user.id).map(replyOut);
+  const replies = (await dbAll(`${REPLY_SQL} WHERE r.note_id = ? AND ${visibleTo('r.')} ORDER BY r.created_at`, params[0], user.id)).map(replyOut);
   return { note: forViewer(noteOut(r), user.id), replies: replies.map((x) => forViewer(x, user.id)), archived: r.day !== today() };
 });
 
 route('POST', /^\/api\/notes\/([\w-]+)\/replies$/, async ({ req, user, params }) => {
   requirePoster(user);
-  const note = q('SELECT * FROM notes WHERE id = ? AND hidden IN (0, ?)').get(params[0], PENDING);
+  const note = (await dbGet('SELECT * FROM notes WHERE id = ? AND hidden IN (0, ?)', params[0], PENDING));
   if (!note || (note.hidden === PENDING && note.user_id !== user.id)) throw new HttpError(404, 'This note is no longer on the board.');
   if (note.hidden === PENDING) throw new HttpError(403, 'Replies open once this note is approved.');
   requireToday(note.day);
   const text = cleanText((await readJson(req)).text);
-  const { support, hold } = moderate(text, user);
+  const { support, hold } = (await moderate(text, user));
   rateLimit(`reply:${user.id}`, 10, 60_000);
   const id = randomUUID();
-  q('INSERT INTO replies (id, note_id, user_id, text, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, note.id, user.id, text, hold ? PENDING : 0, now());
-  const reply = replyOut(q(`${REPLY_SQL} WHERE r.id = ?`).get(id));
+  (await dbRun('INSERT INTO replies (id, note_id, user_id, text, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, note.id, user.id, text, hold ? PENDING : 0, now()));
+  const reply = replyOut((await dbGet(`${REPLY_SQL} WHERE r.id = ?`, id)));
   emit('reply', { ...reply, day: note.day }, { hidden: hold ? PENDING : 0, user_id: user.id });
-  if (!hold) broadcast('note', getNote(note.id)); // refresh reply count
+  if (!hold) broadcast('note', (await getNote(note.id))); // refresh reply count
   return { reply: forViewer(reply, user.id), support, pending: hold };
 });
 
@@ -826,7 +842,7 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
       kind = 'emoji';
       content = body.content;
     } else if (body.kind === 'image' && typeof body.mine === 'string') {
-      const mine = q('SELECT * FROM my_stickers WHERE id = ? AND user_id = ?').get(body.mine, user.id);
+      const mine = (await dbGet('SELECT * FROM my_stickers WHERE id = ? AND user_id = ?', body.mine, user.id));
       if (!mine) throw new HttpError(404, 'Sticker not found in your collection.');
       kind = 'image';
       content = mine.data;
@@ -837,55 +853,53 @@ route('POST', /^\/api\/stickers$/, async ({ req, user }) => {
   const id = randomUUID();
   const size = kind === 'word' || kind === 'line' ? 0 : clamp(body.size || 72, 40, 160);
   const hidden = kind === 'image' ? PENDING : 0;
-  q('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, now(),
-  );
-  const sticker = stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(id));
+  (await dbRun('INSERT INTO stickers (id, day, user_id, kind, content, x, y, size, rot, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', id, today(), user.id, kind, content, posX(body.x, 60), posY(body.y, 40), size, kind === 'line' ? 0 : kind === 'word' ? jitter(2.5) : jitter(10), hidden, now(),));
+  const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', id)));
   emit('sticker', sticker, { hidden, user_id: user.id });
   return { sticker: forViewer(sticker, user.id), pending: hidden === PENDING ? 'it\u2019s a hand-made sticker' : null };
 });
 
 route('PATCH', /^\/api\/stickers\/([\w-]+)$/, async ({ req, user, params }) => {
   requirePoster(user);
-  const row = ownedRow('sticker', params[0], user);
+  const row = (await ownedRow('sticker', params[0], user));
   requireToday(row.day);
   const body = await readJson(req);
-  q('UPDATE stickers SET x = ?, y = ? WHERE id = ?').run(posX(body.x, 60), posY(body.y, 40), row.id);
-  const sticker = stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(row.id));
+  (await dbRun('UPDATE stickers SET x = ?, y = ? WHERE id = ?', posX(body.x, 60), posY(body.y, 40), row.id));
+  const sticker = stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', row.id)));
   emit('sticker', sticker, row);
   return { sticker: forViewer(sticker, user.id) };
 });
 
-route('DELETE', /^\/api\/(note|reply|sticker)s?\/([\w-]+)$/, ({ user, params }) => {
+route('DELETE', /^\/api\/(note|reply|sticker)s?\/([\w-]+)$/, async ({ user, params }) => {
   requireUser(user);
   const [type, id] = [params[0], params[1]];
-  const row = ownedRow(type, id, user);
-  requireToday(dayOf(type, row));
-  q(`UPDATE ${TABLES[type]} SET hidden = 2 WHERE id = ?`).run(id);
-  broadcastRemoval(type, id);
-  if (type === 'reply') broadcast('note', getNote(row.note_id));
+  const row = (await ownedRow(type, id, user));
+  requireToday((await dayOf(type, row)));
+  (await dbRun(`UPDATE ${TABLES[type]} SET hidden = 2 WHERE id = ?`, id));
+  (await broadcastRemoval(type, id));
+  if (type === 'reply') broadcast('note', (await getNote(row.note_id)));
   return { ok: true };
 });
 
 // Personal sticker collection (drawn or uploaded, stored as small PNGs).
-route('GET', /^\/api\/my-stickers$/, ({ user }) => {
+route('GET', /^\/api\/my-stickers$/, async ({ user }) => {
   requireUser(user);
-  return { stickers: q('SELECT id, data FROM my_stickers WHERE user_id = ? ORDER BY created_at DESC').all(user.id) };
+  return { stickers: (await dbAll('SELECT id, data FROM my_stickers WHERE user_id = ? ORDER BY created_at DESC', user.id)) };
 });
 route('POST', /^\/api\/my-stickers$/, async ({ req, user }) => {
   requirePoster(user);
   const { data } = await readJson(req, 220 * 1024);
   if (!validPng(data)) throw new HttpError(400, 'Stickers must be small PNG images (under 150 KB).');
-  const count = q('SELECT COUNT(*) AS c FROM my_stickers WHERE user_id = ?').get(user.id).c;
+  const count = (await dbGet('SELECT COUNT(*) AS c FROM my_stickers WHERE user_id = ?', user.id)).c;
   if (count >= 40) throw new HttpError(400, 'Your collection is full (40 stickers). Remove one to add another.');
   rateLimit(`mysticker:${user.id}`, 10, 600_000);
   const id = randomUUID();
-  q('INSERT INTO my_stickers (id, user_id, data, created_at) VALUES (?, ?, ?, ?)').run(id, user.id, data, now());
+  (await dbRun('INSERT INTO my_stickers (id, user_id, data, created_at) VALUES (?, ?, ?, ?)', id, user.id, data, now()));
   return { sticker: { id, data } };
 });
-route('DELETE', /^\/api\/my-stickers\/([\w-]+)$/, ({ user, params }) => {
+route('DELETE', /^\/api\/my-stickers\/([\w-]+)$/, async ({ user, params }) => {
   requireUser(user);
-  q('DELETE FROM my_stickers WHERE id = ? AND user_id = ?').run(params[0], user.id);
+  (await dbRun('DELETE FROM my_stickers WHERE id = ? AND user_id = ?', params[0], user.id));
   return { ok: true };
 });
 
@@ -896,19 +910,17 @@ route('POST', /^\/api\/flag$/, async ({ req, user }) => {
   requireUser(user);
   const { type, id, reason } = await readJson(req);
   if (!TABLES[type]) throw new HttpError(400, 'Unknown item.');
-  const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ?`).get(id);
+  const row = (await dbGet(`SELECT * FROM ${TABLES[type]} WHERE id = ?`, id));
   if (!row || row.hidden) throw new HttpError(404, 'That is no longer on the board.');
   if (row.user_id === user.id) throw new HttpError(400, 'You can’t flag your own post, but you can delete it.');
   rateLimit(`flag:${user.id}`, 30, 3_600_000);
-  q('INSERT OR IGNORE INTO flags (target_type, target_id, user_id, reason, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    type, id, user.id, FLAG_REASONS.includes(reason) ? reason : 'other', now(),
-  );
+  (await dbRun('INSERT OR IGNORE INTO flags (target_type, target_id, user_id, reason, created_at) VALUES (?, ?, ?, ?, ?)', type, id, user.id, FLAG_REASONS.includes(reason) ? reason : 'other', now(),));
   // Banned identities can still flag, but only active identities count toward auto-hiding.
-  const { c } = q(`SELECT COUNT(*) AS c FROM flags f JOIN users u ON u.id = f.user_id
-                   WHERE f.target_type = ? AND f.target_id = ? AND u.banned = 0`).get(type, id);
+  const { c } = (await dbGet(`SELECT COUNT(*) AS c FROM flags f JOIN users u ON u.id = f.user_id
+                   WHERE f.target_type = ? AND f.target_id = ? AND u.banned = 0`, type, id));
   if (c >= CONFIG.flagsToHide) {
-    q(`UPDATE ${TABLES[type]} SET hidden = ? WHERE id = ?`).run(PENDING, id);
-    broadcastRemoval(type, id);
+    (await dbRun(`UPDATE ${TABLES[type]} SET hidden = ? WHERE id = ?`, PENDING, id));
+    (await broadcastRemoval(type, id));
   }
   return { ok: true };
 });
@@ -921,30 +933,30 @@ function requireAdmin(req) {
     throw new HttpError(401, 'Wrong moderator key.');
   }
 }
-function adminItem(type, id, flagInfo) {
-  const row = q(`SELECT t.*, u.handle, u.strikes, u.banned FROM ${TABLES[type]} t JOIN users u ON u.id = t.user_id WHERE t.id = ?`).get(id);
+async function adminItem(type, id, flagInfo) {
+  const row = (await dbGet(`SELECT t.*, u.handle, u.strikes, u.banned FROM ${TABLES[type]} t JOIN users u ON u.id = t.user_id WHERE t.id = ?`, id));
   if (!row) return null;
   return {
     type, id, flags: flagInfo?.c || 0, reasons: flagInfo ? flagInfo.reasons.split(',') : [], when: flagInfo?.last || row.created_at,
-    text: row.text ?? null, kind: row.kind ?? null, content: row.content ?? null, day: dayOf(type, row), why: row.text ? checkText(row.text).hold : null,
+    text: row.text ?? null, kind: row.kind ?? null, content: row.content ?? null, day: (await dayOf(type, row)), why: row.text ? checkText(row.text).hold : null,
     hidden: row.hidden, pending: row.hidden === PENDING, struck: !!row.struck, author: row.handle, authorStrikes: row.strikes, authorBanned: !!row.banned,
   };
 }
-route('GET', /^\/api\/admin\/flags$/, ({ req }) => {
+route('GET', /^\/api\/admin\/flags$/, async ({ req }) => {
   requireAdmin(req);
   const seen = new Set();
   const items = [];
-  const flagged = new Map(q(`SELECT target_type, target_id, COUNT(*) AS c, GROUP_CONCAT(DISTINCT reason) AS reasons, MAX(created_at) AS last
-                             FROM flags GROUP BY target_type, target_id`).all().map((g) => [`${g.target_type}:${g.target_id}`, g]));
+  const flagged = new Map((await dbAll(`SELECT target_type, target_id, COUNT(*) AS c, GROUP_CONCAT(DISTINCT reason) AS reasons, MAX(created_at) AS last
+                             FROM flags GROUP BY target_type, target_id`)).map((g) => [`${g.target_type}:${g.target_id}`, g]));
   // Waiting for approval first, oldest first, so nobody waits too long.
   for (const [type, table] of Object.entries(TABLES)) {
-    for (const r of q(`SELECT id FROM ${table} WHERE hidden = ? ORDER BY created_at LIMIT 200`).all(PENDING)) {
+    for (const r of (await dbAll(`SELECT id FROM ${table} WHERE hidden = ? ORDER BY created_at LIMIT 200`, PENDING))) {
       seen.add(`${type}:${r.id}`);
-      items.push(adminItem(type, r.id, flagged.get(`${type}:${r.id}`)));
+      items.push((await adminItem(type, r.id, flagged.get(`${type}:${r.id}`))));
     }
   }
   for (const [key, g] of [...flagged].sort((x, y) => y[1].last - x[1].last).slice(0, 200)) {
-    if (!seen.has(key)) items.push(adminItem(g.target_type, g.target_id, g));
+    if (!seen.has(key)) items.push((await adminItem(g.target_type, g.target_id, g)));
   }
   return { items: items.filter(Boolean) };
 });
@@ -952,31 +964,31 @@ route('POST', /^\/api\/admin\/resolve$/, async ({ req }) => {
   requireAdmin(req);
   const { type, id, action } = await readJson(req);
   if (!TABLES[type]) throw new HttpError(400, 'Unknown item.');
-  const row = q(`SELECT * FROM ${TABLES[type]} WHERE id = ?`).get(id);
+  const row = (await dbGet(`SELECT * FROM ${TABLES[type]} WHERE id = ?`, id));
   if (!row) throw new HttpError(404, 'Not found.');
-  const clearFlags = () => q('DELETE FROM flags WHERE target_type = ? AND target_id = ?').run(type, id);
+  const clearFlags = async () => (await dbRun('DELETE FROM flags WHERE target_type = ? AND target_id = ?', type, id));
   if (action === 'approve' || action === 'restore') {
-    q(`UPDATE ${TABLES[type]} SET hidden = 0, struck = 0 WHERE id = ?`).run(id);
-    clearFlags();
-    if (row.struck) removeStrike(row.user_id);
+    (await dbRun(`UPDATE ${TABLES[type]} SET hidden = 0, struck = 0 WHERE id = ?`, id));
+    (await clearFlags());
+    if (row.struck) (await removeStrike(row.user_id));
     // Now everyone can see it.
-    if (type === 'note') broadcast('note', getNote(id));
-    if (type === 'sticker') broadcast('sticker', stickerOut(q('SELECT * FROM stickers WHERE id = ?').get(id)));
+    if (type === 'note') broadcast('note', (await getNote(id)));
+    if (type === 'sticker') broadcast('sticker', stickerOut((await dbGet('SELECT * FROM stickers WHERE id = ?', id))));
     if (type === 'reply') {
-      const note = q('SELECT day FROM notes WHERE id = ?').get(row.note_id);
-      broadcast('reply', { ...replyOut(q(`${REPLY_SQL} WHERE r.id = ?`).get(id)), day: note?.day });
-      broadcast('note', getNote(row.note_id));
+      const note = (await dbGet('SELECT day FROM notes WHERE id = ?', row.note_id));
+      broadcast('reply', { ...replyOut((await dbGet(`${REPLY_SQL} WHERE r.id = ?`, id))), day: note?.day });
+      broadcast('note', (await getNote(row.note_id)));
     }
   } else if (action === 'decline') {
-    q(`UPDATE ${TABLES[type]} SET hidden = 1 WHERE id = ?`).run(id);
-    clearFlags();
+    (await dbRun(`UPDATE ${TABLES[type]} SET hidden = 1 WHERE id = ?`, id));
+    (await clearFlags());
     sendTo(row.user_id, 'removed', { type, id, declined: true });
-    broadcastRemoval(type, id);
+    (await broadcastRemoval(type, id));
   } else if (action === 'remove') {
-    hideForModeration(type, id);
-    clearFlags();
+    (await hideForModeration(type, id));
+    (await clearFlags());
   } else if (action === 'dismiss') {
-    clearFlags();
+    (await clearFlags());
   } else {
     throw new HttpError(400, 'Unknown action.');
   }
@@ -1035,12 +1047,12 @@ const server = http.createServer(async (req, res) => {
   if (isHttps(req)) res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
   const url = new URL(req.url, 'http://local');
   try {
-    if (url.pathname === '/api/stream' && req.method === 'GET') return openStream(req, res, requireUser(sessionUser(req)));
+    if (url.pathname === '/api/stream' && req.method === 'GET') return openStream(req, res, requireUser((await sessionUser(req))));
     if (url.pathname === '/auth/google/start' && req.method === 'GET') return await googleStart(req, res, url);
     if (url.pathname === '/auth/google/callback' && req.method === 'GET') return await googleCallback(req, res, url);
     if (url.pathname.startsWith('/api/')) {
       checkCsrf(req);
-      const user = sessionUser(req);
+      const user = (await sessionUser(req));
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = url.pathname.match(r.pattern);
@@ -1061,19 +1073,18 @@ const server = http.createServer(async (req, res) => {
 });
 
 // A friendly first note on a fresh board, so nobody arrives to an empty room.
-function seedWelcome() {
-  if (q('SELECT COUNT(*) AS c FROM notes').get().c > 0) return;
-  if (!q("SELECT 1 FROM users WHERE id = 'system'").get()) {
+async function seedWelcome() {
+  if ((await dbGet('SELECT COUNT(*) AS c FROM notes')).c > 0) return;
+  if (!(await dbGet("SELECT 1 FROM users WHERE id = 'system'"))) {
     // Unusable passphrase hash: nobody can log in as the board itself.
-    q("INSERT INTO users (id, handle, pass_hash, animal, color, created_at) VALUES ('system', 'board-0000', '!', 'Board', '#57534e', ?)").run(now());
+    (await dbRun("INSERT INTO users (id, handle, pass_hash, animal, color, created_at) VALUES ('system', 'board-0000', '!', 'Board', '#57534e', ?)", now()));
   }
-  q('INSERT INTO notes (id, day, user_id, text, color, x, y, rot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    randomUUID(), today(), 'system',
+  (await dbRun('INSERT INTO notes (id, day, user_id, text, color, x, y, rot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', randomUUID(), today(), 'system',
     'Welcome.\n\nThis is a board for anyone who wants someone to talk to. Pin a thought, a worry, a small win. There’s no word limit. Someone will write back.\n\nYou’re anonymous here. Be kind, always.',
-    'butter', CONFIG.boardW / 2 - 130, CONFIG.boardH / 2 - 140, -0.6, now(),
-  );
+    'butter', CONFIG.boardW / 2 - 130, CONFIG.boardH / 2 - 140, -0.6, now(),));
 }
-seedWelcome();
+await setupDatabase();
+await seedWelcome();
 
 server.listen(CONFIG.port, () => {
   console.log(`[kindboard] listening on http://localhost:${CONFIG.port}  (boards roll over at midnight ${CONFIG.timeZone})`);
